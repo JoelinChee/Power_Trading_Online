@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Resolve all important paths from the script location so this entry point is
+# safe to execute from any current working directory.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ARTIFACTS_ROOT="$REPO_ROOT/generated"
+RUNTIME_DIR="$ARTIFACTS_ROOT/kafka-local"
+KAFKA_VERSION="3.7.1"
+SCALA_VERSION="2.13"
+KAFKA_DIR="$RUNTIME_DIR/kafka_${SCALA_VERSION}-${KAFKA_VERSION}"
+ARCHIVE_NAME="kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz"
+ARCHIVE_PATH="$RUNTIME_DIR/$ARCHIVE_NAME"
+DOWNLOAD_URL="https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/${ARCHIVE_NAME}"
+PID_FILE="$RUNTIME_DIR/kafka.pid"
+CLUSTER_ID_FILE="$RUNTIME_DIR/cluster.id"
+CONFIG_FILE="$RUNTIME_DIR/server-low-memory.properties"
+LOG_DIR="$RUNTIME_DIR/kraft-logs"
+SERVER_LOG="$RUNTIME_DIR/server.out"
+
+# Create the external runtime directory tree outside the repository.
+mkdir -p "$RUNTIME_DIR"
+
+# Remove any stale JVM replay files from the repository if they exist from old runs.
+find "$REPO_ROOT" -maxdepth 1 \( -name 'hs_err_pid*.log' -o -name 'replay_pid*.log' \) -delete
+
+# Exit early when a healthy Kafka process is already registered.
+if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+    echo "Kafka already running with PID $(cat "$PID_FILE")"
+    exit 0
+fi
+
+# Download and unpack Kafka only once into the sibling artifact directory.
+if [[ ! -d "$KAFKA_DIR" ]]; then
+    if [[ -f "$ARCHIVE_PATH" ]] && ! tar -tzf "$ARCHIVE_PATH" >/dev/null 2>&1; then
+        echo "检测到损坏的 Kafka 压缩包，正在重新下载: $ARCHIVE_PATH"
+        rm -f "$ARCHIVE_PATH"
+    fi
+
+    if [[ ! -f "$ARCHIVE_PATH" ]]; then
+        echo "正在下载 Kafka，请等待: $DOWNLOAD_URL"
+        wget --show-progress -O "$ARCHIVE_PATH" "$DOWNLOAD_URL"
+    fi
+
+    if ! tar -tzf "$ARCHIVE_PATH" >/dev/null 2>&1; then
+        echo "Kafka 压缩包校验失败: $ARCHIVE_PATH" >&2
+        exit 1
+    fi
+
+    echo "正在解压 Kafka 到 $RUNTIME_DIR"
+    tar -xzf "$ARCHIVE_PATH" -C "$RUNTIME_DIR"
+fi
+
+mkdir -p "$LOG_DIR"
+
+# Write a low-resource single-node KRaft configuration that fits this machine.
+cat > "$CONFIG_FILE" <<EOF
+process.roles=broker,controller
+node.id=1
+controller.quorum.voters=1@127.0.0.1:9093
+listeners=PLAINTEXT://127.0.0.1:9092,CONTROLLER://127.0.0.1:9093
+advertised.listeners=PLAINTEXT://127.0.0.1:9092
+inter.broker.listener.name=PLAINTEXT
+controller.listener.names=CONTROLLER
+listener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+log.dirs=$LOG_DIR
+num.partitions=1
+log.segment.bytes=1048576
+log.index.size.max.bytes=262144
+offsets.topic.replication.factor=1
+offsets.topic.num.partitions=1
+offsets.topic.segment.bytes=1048576
+transaction.state.log.replication.factor=1
+transaction.state.log.min.isr=1
+transaction.state.log.num.partitions=1
+group.initial.rebalance.delay.ms=0
+auto.create.topics.enable=true
+EOF
+
+# Generate a stable cluster identifier once and reuse it across restarts.
+if [[ ! -f "$CLUSTER_ID_FILE" ]]; then
+    "$KAFKA_DIR/bin/kafka-storage.sh" random-uuid > "$CLUSTER_ID_FILE"
+fi
+
+# Format the KRaft metadata directory only when it has not been initialized yet.
+if [[ ! -f "$LOG_DIR/meta.properties" ]]; then
+    "$KAFKA_DIR/bin/kafka-storage.sh" format -t "$(cat "$CLUSTER_ID_FILE")" -c "$CONFIG_FILE"
+fi
+
+# Start Kafka with a bounded heap that has been verified to pass the project smoke test.
+KAFKA_HEAP_OPTS='-Xms128M -Xmx256M' nohup "$KAFKA_DIR/bin/kafka-server-start.sh" "$CONFIG_FILE" > "$SERVER_LOG" 2>&1 &
+echo $! > "$PID_FILE"
+echo "Started local Kafka with PID $(cat "$PID_FILE")"

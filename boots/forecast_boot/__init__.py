@@ -1,0 +1,1 @@
+"""Forecast boot application package."""
