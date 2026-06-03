@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import threading
-from collections import deque
+import logging
 from functools import lru_cache
 from uuid import uuid4
 
@@ -17,11 +16,13 @@ from common.schemas import (
     TradeOrderRequest,
     TradeOrderResponse,
 )
-from common.timer import PeriodicWorker
+
+
+logger = logging.getLogger(__name__)
 
 
 class ExecutionService:
-    """Service layer for synchronous execution APIs and Kafka-consumed decisions."""
+    """Service layer for synchronous execution APIs and forecast topic consumption."""
 
     def __init__(self) -> None:
         self.settings = ExecutionBootSettings(host="0.0.0.0", port=8003)
@@ -31,15 +32,8 @@ class ExecutionService:
             group_suffix="decision",
             handler=self._handle_forecast_event,
         )
-        self._pending_payloads: deque[bytes] = deque()
-        self._pending_lock = threading.Lock()
-        self._timer_worker = PeriodicWorker(
-            name=f"{self.settings.service_name}-timer",
-            interval_seconds=self.settings.timer_interval_seconds,
-            callback=self._flush_pending_forecast_events,
-        )
         self.last_consumed_event: dict[str, object] | None = None
-        self.last_published_event: dict[str, object] | None = None
+        self.last_processed_result: dict[str, object] | None = None
 
     def risk_check(self, request: RiskCheckRequest) -> RiskCheckResponse:
         """Evaluate a basic rule-based risk decision.
@@ -91,62 +85,36 @@ class ExecutionService:
         return response
 
     def start_pipeline(self) -> None:
-        """Start the Kafka consumer and timer-driven execution worker."""
+        """Start the forecast topic consumer."""
         self.forecast_consumer.start()
-        self._timer_worker.start()
 
     def stop_pipeline(self) -> None:
-        """Stop the forecast-event Kafka consumer and timer-driven worker."""
+        """Stop the forecast topic consumer."""
         self.forecast_consumer.stop()
-        self._timer_worker.stop()
 
     def get_pipeline_status(self) -> PipelineStatusResponse:
-        """Return the latest consumed forecast event and generated execution result."""
-        with self._pending_lock:
-            pending_event_count = len(self._pending_payloads)
+        """Return latest consumed forecast event and processed execution result."""
 
         return PipelineStatusResponse(
             service_name=self.settings.service_name,
             last_consumed_event_id=(self.last_consumed_event or {}).get("event_id"),
-            last_published_event_id=(self.last_published_event or {}).get("event_id"),
+            last_published_event_id=(self.last_processed_result or {}).get("event_id"),
             details={
                 "last_consumed_event": self.last_consumed_event or {},
-                "last_published_event": self.last_published_event or {},
-                "pending_event_count": pending_event_count,
-                "timer_interval_seconds": self.settings.timer_interval_seconds,
+                "last_processed_result": self.last_processed_result or {},
             },
         )
 
     def _handle_forecast_event(self, payload: bytes) -> None:
-        """Queue a forecast event payload for timer-driven execution.
-
-        Args:
-            payload: Binary protobuf payload consumed from the forecast topic.
-        """
+        """Consume forecast.events payload and execute risk/order processing."""
         event = trading_messages_pb2.ForecastEvent()
         event.ParseFromString(payload)
         self.last_consumed_event = MessageToDict(event, preserving_proto_field_name=True)
 
-        with self._pending_lock:
-            self._pending_payloads.append(payload)
-
-    def _flush_pending_forecast_events(self) -> None:
-        """Process all queued forecast events on the current timer tick."""
-        with self._pending_lock:
-            pending_payloads = list(self._pending_payloads)
-            self._pending_payloads.clear()
-
-        for payload in pending_payloads:
-            self._process_forecast_event(payload)
-
-    def _process_forecast_event(self, payload: bytes) -> None:
-        """Convert one queued forecast event into a risk result and trade order event."""
-        event = trading_messages_pb2.ForecastEvent()
-        event.ParseFromString(payload)
-
         predicted_load_mw = sum(point.value for point in event.load_points) / max(len(event.load_points), 1)
         predicted_price = sum(point.value for point in event.price_points) / max(len(event.price_points), 1)
         budget_limit = predicted_load_mw * 460
+
         risk_request = RiskCheckRequest(
             enterprise_id=event.enterprise_id,
             predicted_load_mw=predicted_load_mw,
@@ -156,19 +124,19 @@ class ExecutionService:
         )
         risk_response = self.risk_check(risk_request)
 
-        execution_event = trading_messages_pb2.ExecutionEvent()
-        execution_event.event_id = str(uuid4())
-        execution_event.source_service = self.settings.service_name
-        execution_event.upstream_event_id = event.event_id
-        execution_event.published_at = event.published_at
-        execution_event.enterprise_id = event.enterprise_id
-        execution_event.target_date = event.target_date
-        execution_event.approved = risk_response.approved
-        execution_event.risk_score = risk_response.risk_score
-        execution_event.reasons.extend(risk_response.reasons)
+        result: dict[str, object] = {
+            "event_id": str(uuid4()),
+            "source_service": self.settings.service_name,
+            "upstream_event_id": event.event_id,
+            "enterprise_id": event.enterprise_id,
+            "target_date": event.target_date,
+            "approved": risk_response.approved,
+            "risk_score": risk_response.risk_score,
+            "reasons": list(risk_response.reasons),
+        }
 
         if risk_response.approved:
-            trade_response = self.create_trade_order(
+            trade_order = self.create_trade_order(
                 TradeOrderRequest(
                     enterprise_id=event.enterprise_id,
                     target_date=event.target_date,
@@ -177,15 +145,17 @@ class ExecutionService:
                     approved=True,
                 )
             )
-            execution_event.order_id = trade_response.order_id
-            execution_event.order_type = trade_response.order_type
-            execution_event.quantity_mwh = trade_response.quantity_mwh
-            execution_event.limit_price = trade_response.limit_price
-            execution_event.status = trade_response.status
+            result["order"] = trade_order.model_dump()
+            result["status"] = "CREATED"
         else:
-            execution_event.status = "REJECTED"
+            result["status"] = "REJECTED"
 
-        self.last_published_event = MessageToDict(execution_event, preserving_proto_field_name=True)
+        self.last_processed_result = result
+        logger.warning(
+            "execution_boot processed forecast event_id=%s approved=%s",
+            event.event_id,
+            risk_response.approved,
+        )
 
 
 @lru_cache(maxsize=1)

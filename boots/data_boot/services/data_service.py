@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
-from uuid import uuid4
 
-import httpx
 from google.protobuf.json_format import MessageToDict
 
 from common.config import DataBootSettings
-from common.proto_loader import trading_messages_pb2
-from common.schemas import DataIngestionRequest, ForecastPipelineRequest, PipelineStatusResponse
+from common.kafka import KafkaPublisher
+from common.proto_loader import weather_pb2
+from common.schemas import DataIngestionRequest, PipelineStatusResponse
 
 
 class DataService:
@@ -16,6 +16,7 @@ class DataService:
 
     def __init__(self) -> None:
         self.settings = DataBootSettings(host="0.0.0.0", port=8001)
+        self.publisher = KafkaPublisher(self.settings)
         self.last_published_event: dict[str, object] | None = None
         self.last_feedback_event: dict[str, object] | None = None
 
@@ -45,66 +46,54 @@ class DataService:
             },
         }
 
+    def publish_browser_weather(self) -> dict[str, object]:
+        """Build one sample hourly weather dataset and publish it to Kafka.
+
+        Returns:
+            Browser-facing acknowledgement that the weather dataset was sent.
+        """
+
+        dataset = self._build_hourly_weather_dataset()
+        self.publisher.publish_proto("weather.events", dataset, key=dataset.daily_weather[0].region_code)
+        self.last_published_event = MessageToDict(dataset, preserving_proto_field_name=True)
+        self.last_feedback_event = {
+            "accepted": True,
+            "message": "Kafka发送成功",
+            "topic": self.settings.topic_name("weather.events"),
+            "generated_at": dataset.generated_at,
+            "target_service": "forecast_boot",
+        }
+        return self.last_feedback_event
+
     def ingest(self, request: DataIngestionRequest) -> dict[str, object]:
-        """Convert an HTTP ingestion request into a source event and forward it.
+        """Accept an ingestion request without publishing to Kafka topics.
 
         Args:
             request: Structured HTTP payload containing weather, load, price,
                 and renewable generation information.
 
         Returns:
-            Response payload that confirms the accepted event and the forecast
-                queue acknowledgement returned by forecast boot.
+            Response payload that confirms the request was accepted.
         """
-        event = trading_messages_pb2.DataIngestionEvent()
-        event.event_id = str(uuid4())
-        event.source_service = self.settings.service_name
-        event.published_at = request.load.timestamp
-        event.enterprise_id = request.load.enterprise_id
-        event.target_date = request.load.timestamp[:10]
-
-        event.weather.temperature_celsius = request.weather.temperature_celsius
-        event.weather.humidity_ratio = request.weather.humidity_ratio
-        event.weather.wind_speed_mps = request.weather.wind_speed_mps
-        event.weather.weather_type = request.weather.weather_type
-
-        event.load.timestamp = request.load.timestamp
-        event.load.load_mw = request.load.load_mw
-
-        event.price.timestamp = request.price.timestamp
-        event.price.spot_price = request.price.spot_price
-        event.price.market = request.price.market
-
-        event.renewable.timestamp = request.renewable.timestamp
-        event.renewable.wind_output_mw = request.renewable.wind_output_mw
-        event.renewable.solar_output_mw = request.renewable.solar_output_mw
-
-        self.last_published_event = MessageToDict(event, preserving_proto_field_name=True)
-        forecast_request = ForecastPipelineRequest(
-            upstream_event_id=event.event_id,
-            source_service=self.settings.service_name,
-            published_at=event.published_at,
-            target_date=event.target_date,
-            weather=request.weather,
-            load=request.load,
-            price=request.price,
-            renewable=request.renewable,
-        )
-
-        with httpx.Client() as client:
-            response = client.post(
-                f"{self.settings.forecast_boot_base_url}/api/v1/forecast/events",
-                json=forecast_request.model_dump(),
-                timeout=10.0,
-            )
-            response.raise_for_status()
-
-        self.last_feedback_event = response.json()
+        self.last_published_event = {
+            "source_service": self.settings.service_name,
+            "published_at": request.load.timestamp,
+            "enterprise_id": request.load.enterprise_id,
+            "target_date": request.load.timestamp[:10],
+            "weather": request.weather.model_dump(),
+            "load": request.load.model_dump(),
+            "price": request.price.model_dump(),
+            "renewable": request.renewable.model_dump(),
+        }
+        self.last_feedback_event = {
+            "accepted": True,
+            "message": "Data accepted (no Kafka topic publication)",
+        }
         return {
             "accepted": True,
-            "message": "Data accepted and queued in forecast boot",
+            "message": "Data accepted",
             "event": self.last_published_event,
-            "forecast_ack": self.last_feedback_event,
+            "publish_ack": self.last_feedback_event,
         }
 
     def start_pipeline(self) -> None:
@@ -124,6 +113,63 @@ class DataService:
                 "last_feedback_event": self.last_feedback_event or {},
             },
         )
+
+    def _build_hourly_weather_dataset(self) -> weather_pb2.HourlyWeatherDataset:
+        """Create a 24-hour sample weather dataset for browser-triggered publication."""
+
+        base_time = datetime.now(timezone(timedelta(hours=8))).replace(minute=0, second=0, microsecond=0)
+        dataset = weather_pb2.HourlyWeatherDataset()
+        dataset.source = self.settings.service_name
+        dataset.generated_at = base_time.isoformat()
+
+        daily_weather = dataset.daily_weather.add()
+        daily_weather.target_date = base_time.date().isoformat()
+        daily_weather.region_code = "CN-SH"
+        daily_weather.region_name = "Shanghai"
+
+        base_temperature = 29.5
+        base_humidity = 74.0
+        base_pressure = 1008.0
+
+        for hour in range(24):
+            hourly = daily_weather.hourly_weather.add()
+            timestamp = base_time + timedelta(hours=hour)
+            hourly.timestamp = timestamp.isoformat()
+            hourly.target_date = timestamp.date().isoformat()
+            hourly.hour_of_day = timestamp.hour
+            hourly.forecast_hour = hour
+            hourly.region_code = daily_weather.region_code
+            hourly.region_name = daily_weather.region_name
+            hourly.condition = weather_pb2.WEATHER_CONDITION_PARTLY_CLOUDY if 6 <= timestamp.hour <= 18 else weather_pb2.WEATHER_CONDITION_CLOUDY
+            hourly.condition_text = "partly_cloudy" if 6 <= timestamp.hour <= 18 else "cloudy"
+            hourly.temperature_celsius = round(base_temperature + ((hour % 8) - 4) * 0.8, 2)
+            hourly.apparent_temperature_celsius = round(hourly.temperature_celsius + 1.6, 2)
+            hourly.humidity_percent = round(base_humidity + ((hour % 6) - 3) * 2.5, 2)
+            hourly.dew_point_celsius = round(hourly.temperature_celsius - 4.2, 2)
+            hourly.pressure_hpa = round(base_pressure + ((hour % 5) - 2) * 1.3, 2)
+            hourly.visibility_km = 8.5 if 5 <= timestamp.hour <= 21 else 6.2
+            hourly.cloud_cover_percent = 38.0 if 6 <= timestamp.hour <= 18 else 68.0
+            hourly.solar_irradiance_wm2 = max(0.0, round((12 - abs(timestamp.hour - 12)) * 62.5, 2))
+            hourly.uv_index = max(0.0, round((12 - abs(timestamp.hour - 12)) * 0.6, 2))
+
+            hourly.wind.speed_mps = round(4.2 + (hour % 4) * 0.7, 2)
+            hourly.wind.gust_speed_mps = round(hourly.wind.speed_mps + 2.1, 2)
+            hourly.wind.direction_degrees = float((hour * 15) % 360)
+            hourly.wind.direction_text = self._wind_direction_text(hourly.wind.direction_degrees)
+            hourly.wind.level = weather_pb2.WIND_LEVEL_GENTLE_BREEZE if hourly.wind.speed_mps < 6.0 else weather_pb2.WIND_LEVEL_MODERATE_BREEZE
+
+            hourly.precipitation.type = weather_pb2.PRECIPITATION_TYPE_RAIN if 14 <= timestamp.hour <= 17 else weather_pb2.PRECIPITATION_TYPE_NONE
+            hourly.precipitation.amount_mm = 1.6 if 14 <= timestamp.hour <= 17 else 0.0
+            hourly.precipitation.probability_percent = 62.0 if 14 <= timestamp.hour <= 17 else 12.0
+            hourly.precipitation.snow_depth_cm = 0.0
+
+        return dataset
+
+    def _wind_direction_text(self, direction_degrees: float) -> str:
+        """Convert numeric wind direction into a compact compass label."""
+
+        labels = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+        return labels[int((direction_degrees + 22.5) % 360 // 45)]
 
 
 @lru_cache(maxsize=1)

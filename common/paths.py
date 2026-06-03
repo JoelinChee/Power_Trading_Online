@@ -18,7 +18,6 @@ ARTIFACTS_ROOT = REPO_ROOT / "generated"
 
 # Generated protobuf modules are compiled directly into the artifact root.
 GENERATED_PARENT_DIR = ARTIFACTS_ROOT
-GENERATED_PACKAGE_DIR = ARTIFACTS_ROOT
 
 # Service logs and PID files are separated for easier operational cleanup.
 LOG_DIR = ARTIFACTS_ROOT / "logs"
@@ -30,11 +29,7 @@ KAFKA_ARTIFACTS_DIR = ARTIFACTS_ROOT / "kafka-local"
 # Python bytecode cache is also externalized so runtime imports do not dirty the repo.
 PYCACHE_DIR = ARTIFACTS_ROOT / "pycache"
 
-# Repository-local, version-controlled directories.
-ENVIRONMENT_DIR = REPO_ROOT / "environment"
-PROTO_DIR = REPO_ROOT / "pub_interfaces"
 ENV_FILE_PATH = REPO_ROOT / ".env"
-ENV_TEMPLATE_PATH = REPO_ROOT / ".env.example"
 
 
 def ensure_artifact_directories() -> None:
@@ -44,5 +39,5 @@ def ensure_artifact_directories() -> None:
     shell-entry scripts to make startup deterministic.
     """
 
-    for directory in (ARTIFACTS_ROOT, GENERATED_PACKAGE_DIR, LOG_DIR, PID_DIR, KAFKA_ARTIFACTS_DIR, PYCACHE_DIR):
+    for directory in (ARTIFACTS_ROOT, GENERATED_PARENT_DIR, LOG_DIR, PID_DIR, KAFKA_ARTIFACTS_DIR, PYCACHE_DIR):
         directory.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,9 @@
 """FastAPI application entry point for the data acquisition boot service."""
 
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
+from typing import Any, Dict
 
 from fastapi import FastAPI
 
@@ -33,6 +36,14 @@ def create_app() -> FastAPI:
     """
 
     app = FastAPI(title="Data Boot", version="0.1.0", lifespan=lifespan)
+
+    @app.get("/")
+    def publish_weather_to_forecast() -> Dict[str, Any]:
+        """Publish a sample weather dataset when the browser visits data boot."""
+
+        service = get_data_service()
+        return service.publish_browser_weather()
+
     app.include_router(health_router)
     app.include_router(data_router)
     return app

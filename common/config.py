@@ -25,6 +25,7 @@ class BaseBootSettings(BaseSettings):
     kafka_topic_prefix: str = Field(default="power_trading", description="Prefix applied to all business Kafka topics.")
     kafka_enabled: bool = Field(default=False, description="Feature switch that enables or disables Kafka producers and consumers.")
     kafka_consumer_group_prefix: str = Field(default="power_trading", description="Prefix used when building service consumer-group identifiers.")
+    kafka_consumer_group_salt: str = Field(default="", description="Optional suffix appended to Kafka consumer-group names to force replay with a fresh group.")
     kafka_auto_offset_reset: str = Field(default="earliest", description="Offset reset strategy used when a consumer group has no committed offsets.")
 
     service_name: str = Field(description="Stable service identifier used in logs, topics, and consumer-group names.")
@@ -36,7 +37,7 @@ class BaseBootSettings(BaseSettings):
 
         Args:
             topic_suffix: The business-specific part of the topic name, such as
-                `data.events` or `forecast.events`.
+                `weather.events` or `forecast.events`.
 
         Returns:
             The full topic name with the configured prefix applied.
@@ -53,7 +54,10 @@ class BaseBootSettings(BaseSettings):
         Returns:
             A stable consumer-group name that is unique per service and role.
         """
-        return f"{self.kafka_consumer_group_prefix}.{self.service_name}.{group_suffix}"
+        base_group = f"{self.kafka_consumer_group_prefix}.{self.service_name}.{group_suffix}"
+        if self.kafka_consumer_group_salt:
+            return f"{base_group}.{self.kafka_consumer_group_salt}"
+        return base_group
 
 
 class DataBootSettings(BaseBootSettings):
@@ -62,7 +66,6 @@ class DataBootSettings(BaseBootSettings):
     service_name: str = "data_boot"
     host: str = "0.0.0.0"
     port: int = 8001
-    forecast_boot_base_url: str = "http://127.0.0.1:8002"
 
 
 class ForecastBootSettings(BaseBootSettings):
@@ -71,7 +74,7 @@ class ForecastBootSettings(BaseBootSettings):
     service_name: str = "forecast_boot"
     host: str = "0.0.0.0"
     port: int = 8002
-    timer_interval_seconds: float = Field(default=10.0, description="Seconds between timer-triggered forecast publication cycles.")
+    timer_interval_seconds: float = Field(default=5.0, description="Seconds between timer-triggered forecast publication cycles.")
 
 
 class ExecutionBootSettings(BaseBootSettings):

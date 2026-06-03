@@ -151,9 +151,6 @@ cp .env.example .env
 ### Forecast Boot
 
 - `GET /health`
-- `POST /api/v1/forecast/weather`
-- `POST /api/v1/forecast/load-96`
-- `POST /api/v1/forecast/price-96`
 - `GET /api/v1/forecast/pipeline-status`
 
 ### Execution Boot
@@ -165,12 +162,12 @@ cp .env.example .env
 
 ## Kafka 链路
 
-三套 boot 的消息链路如下：
+当前仅保留两条 Kafka 收发链路（对应 `weather.proto` 与 `trading_messages.proto`）：
 
-1. `data_boot` 发布 `power_trading.data.events`
-2. `forecast_boot` 订阅 `power_trading.data.events`，生成预测后发布 `power_trading.forecast.events`
-3. `execution_boot` 订阅 `power_trading.forecast.events`，生成风控与交易结果后发布 `power_trading.execution.events`
-4. `data_boot` 回收 `power_trading.execution.events` 作为执行反馈
+1. `data_boot` 发布 `power_trading.weather.events`（`weather.proto`）
+2. `forecast_boot` 订阅 `power_trading.weather.events`
+3. `forecast_boot` 基于天气数据生成并发布 `power_trading.forecast.events`（`trading_messages.proto`）
+4. `execution_boot` 订阅 `power_trading.forecast.events`
 
 ## 动态联调
 
@@ -180,17 +177,18 @@ cp .env.example .env
 python3 scripts/kafka_pipeline_smoke_test.py
 ```
 
-该脚本会向 `data_boot` 发起一条采集请求，并轮询三个 boot 的 `/pipeline-status` 接口，确认 protobuf 消息已完成端到端收发。
+该脚本会触发一次 `data_boot` 天气发布，并轮询三个 boot 的 `/pipeline-status` 接口，确认 `weather.events -> forecast.events -> execution_boot` 链路收发正常。
 
 Python 运行期间产生的 `__pycache__` 也会统一写入 `generated/pycache/`，不会分散写入源码目录。
+
+通过仓库脚本、VS Code 调试配置以及新打开的 VS Code 终端启动 Python 时，会默认继承 `PYTHONPYCACHEPREFIX=generated/pycache`。如果是在仓库外部 shell 手工执行 `python`，需要先手工执行 `export PYTHONPYCACHEPREFIX="$PWD/generated/pycache"`。
 
 在资源较紧张的机器上，建议使用仓库内置的 `start_local_kafka.sh`，它会以低内存参数启动单节点 KRaft Kafka，并将 `__consumer_offsets` 等内部主题分区数降到 1，避免默认配置带来的额外内存压力。
 
 ## Kafka 主题建议
 
-- `power_trading.data.events`
+- `power_trading.weather.events`
 - `power_trading.forecast.events`
-- `power_trading.execution.events`
 
 ## 后续扩展建议
 

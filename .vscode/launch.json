@@ -1,0 +1,80 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        // {
+        //     "name": "data_boot 调试 (8001)",
+        //     "type": "python",
+        //     "request": "launch",
+        //     "python": "/home/joelin/miniconda3/envs/test_RL/bin/python",
+        //     "module": "uvicorn",
+        //     "cwd": "${workspaceFolder}",
+        //     "args": [
+        //         "boots.data_boot.main:app",
+        //         "--host",
+        //         "0.0.0.0",
+        //         "--port",
+        //         "8001"
+        //     ],
+        //     "env": {
+        //         "PYTHONPATH": "${workspaceFolder}/generated:${workspaceFolder}:${workspaceFolder}/Power_Trading_Online",
+        //         "PYTHONPYCACHEPREFIX": "${workspaceFolder}/generated/pycache",
+        //         "DATA_BOOT_PORT": "8001",
+        //         "FORECAST_BOOT_PORT": "8002",
+        //         "EXECUTION_BOOT_PORT": "8003"
+        //     },
+        //     "console": "integratedTerminal",
+        //     "justMyCode": false,
+        //     "reload": true
+        // },
+        {
+            "name": "forecast_boot 调试 (8002)",
+            "type": "python",
+            "request": "launch",
+            "python": "/home/joelin/miniconda3/envs/test_RL/bin/python",
+            "module": "uvicorn",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "boots.forecast_boot.main:app",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "8002"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/generated:${workspaceFolder}:${workspaceFolder}/Power_Trading_Online",
+                "PYTHONPYCACHEPREFIX": "${workspaceFolder}/generated/pycache",
+                "DATA_BOOT_PORT": "8001",
+                "FORECAST_BOOT_PORT": "8002",
+                "EXECUTION_BOOT_PORT": "8003"
+            },
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "reload": true
+        },
+        {
+            "name": "execution_boot 调试 (8003)",
+            "type": "python",
+            "request": "launch",
+            "python": "/home/joelin/miniconda3/envs/test_RL/bin/python",
+            "module": "uvicorn",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "boots.execution_boot.main:app",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "8003"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/generated:${workspaceFolder}:${workspaceFolder}/Power_Trading_Online",
+                "PYTHONPYCACHEPREFIX": "${workspaceFolder}/generated/pycache",
+                "DATA_BOOT_PORT": "8001",
+                "FORECAST_BOOT_PORT": "8002",
+                "EXECUTION_BOOT_PORT": "8003"
+            },
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "reload": true
+        }
+    ]
+}

@@ -19,3 +19,4 @@ if str(GENERATED_PARENT_DIR) not in sys.path:
     sys.path.insert(0, str(GENERATED_PARENT_DIR))
 
 import trading_messages_pb2  # noqa: E402
+import weather_pb2  # noqa: E402

@@ -1,0 +1,148 @@
+// Shared protobuf contracts for hourly weather observations and forecasts.
+//
+// These messages model a full hourly weather dataset that can be reused by
+// ingestion, forecast, and external integration flows.
+
+syntax = "proto3";
+
+package power_trading;
+
+// High-level weather categories used for downstream display and rule logic.
+enum WeatherCondition {
+	WEATHER_CONDITION_UNSPECIFIED = 0;
+	WEATHER_CONDITION_CLEAR = 1;
+	WEATHER_CONDITION_PARTLY_CLOUDY = 2;
+	WEATHER_CONDITION_CLOUDY = 3;
+	WEATHER_CONDITION_OVERCAST = 4;
+	WEATHER_CONDITION_LIGHT_RAIN = 5;
+	WEATHER_CONDITION_MODERATE_RAIN = 6;
+	WEATHER_CONDITION_HEAVY_RAIN = 7;
+	WEATHER_CONDITION_THUNDERSTORM = 8;
+	WEATHER_CONDITION_SLEET = 9;
+	WEATHER_CONDITION_LIGHT_SNOW = 10;
+	WEATHER_CONDITION_MODERATE_SNOW = 11;
+	WEATHER_CONDITION_HEAVY_SNOW = 12;
+	WEATHER_CONDITION_FOG = 13;
+	WEATHER_CONDITION_HAZE = 14;
+	WEATHER_CONDITION_DUST = 15;
+	WEATHER_CONDITION_SANDSTORM = 16;
+}
+
+// Qualitative intensity label for precipitation events.
+enum PrecipitationType {
+	PRECIPITATION_TYPE_UNSPECIFIED = 0;
+	PRECIPITATION_TYPE_NONE = 1;
+	PRECIPITATION_TYPE_RAIN = 2;
+	PRECIPITATION_TYPE_SNOW = 3;
+	PRECIPITATION_TYPE_SLEET = 4;
+	PRECIPITATION_TYPE_HAIL = 5;
+	PRECIPITATION_TYPE_FREEZING_RAIN = 6;
+}
+
+// Relative wind force level aligned with the Beaufort-like integer scale.
+enum WindLevel {
+	WIND_LEVEL_UNSPECIFIED = 0;
+	WIND_LEVEL_CALM = 1;
+	WIND_LEVEL_LIGHT_AIR = 2;
+	WIND_LEVEL_LIGHT_BREEZE = 3;
+	WIND_LEVEL_GENTLE_BREEZE = 4;
+	WIND_LEVEL_MODERATE_BREEZE = 5;
+	WIND_LEVEL_FRESH_BREEZE = 6;
+	WIND_LEVEL_STRONG_BREEZE = 7;
+	WIND_LEVEL_NEAR_GALE = 8;
+	WIND_LEVEL_GALE = 9;
+	WIND_LEVEL_STRONG_GALE = 10;
+	WIND_LEVEL_STORM = 11;
+	WIND_LEVEL_VIOLENT_STORM = 12;
+	WIND_LEVEL_HURRICANE = 13;
+}
+
+// Wind vector information for one hourly weather point.
+message WindInfo {
+	// Average wind speed in meters per second.
+	double speed_mps = 1;
+	// Instantaneous gust speed in meters per second.
+	double gust_speed_mps = 2;
+	// Wind direction in degrees, where 0 means north and 90 means east.
+	double direction_degrees = 3;
+	// Human-readable wind direction label, such as N, NE, or SW.
+	string direction_text = 4;
+	// Qualitative wind-force level.
+	WindLevel level = 5;
+}
+
+// Precipitation metrics for one hourly weather point.
+message PrecipitationInfo {
+	// Main precipitation type observed or forecast for the hour.
+	PrecipitationType type = 1;
+	// Hourly precipitation amount in millimeters.
+	double amount_mm = 2;
+	// Probability of precipitation expressed as a value from 0 to 100.
+	double probability_percent = 3;
+	// Snow depth in centimeters when snow is present.
+	double snow_depth_cm = 4;
+}
+
+// A comprehensive hourly weather record.
+message HourlyWeather {
+	// Local observation or forecast timestamp encoded as ISO 8601.
+	string timestamp = 1;
+	// Trading day date, for example 2026-06-03.
+	string target_date = 2;
+	// Hour number within the day, from 0 to 23.
+	int32 hour_of_day = 3;
+	// Forecast horizon offset in hours from the model base time.
+	int32 forecast_hour = 4;
+	// Geographic region, city, or site identifier.
+	string region_code = 5;
+	// Human-readable region name.
+	string region_name = 6;
+	// Dominant weather condition for the hour.
+	WeatherCondition condition = 7;
+	// Human-readable weather description.
+	string condition_text = 8;
+	// Ambient air temperature in degrees Celsius.
+	double temperature_celsius = 9;
+	// Feels-like temperature in degrees Celsius.
+	double apparent_temperature_celsius = 10;
+	// Relative humidity percentage on a 0-100 scale.
+	double humidity_percent = 11;
+	// Dew-point temperature in degrees Celsius.
+	double dew_point_celsius = 12;
+	// Atmospheric pressure in hectopascals.
+	double pressure_hpa = 13;
+	// Visibility in kilometers.
+	double visibility_km = 14;
+	// Total cloud-cover percentage on a 0-100 scale.
+	double cloud_cover_percent = 15;
+	// Total solar irradiance in watts per square meter.
+	double solar_irradiance_wm2 = 16;
+	// Ultraviolet index for the hour.
+	double uv_index = 17;
+	// Nested wind metrics.
+	WindInfo wind = 18;
+	// Nested precipitation metrics.
+	PrecipitationInfo precipitation = 19;
+}
+
+// A daily collection of 24 hourly weather records.
+message DailyHourlyWeather {
+	// Trading day date, for example 2026-06-03.
+	string target_date = 1;
+	// Geographic region, city, or site identifier.
+	string region_code = 2;
+	// Human-readable region name.
+	string region_name = 3;
+	// Ordered hourly weather records for the day.
+	repeated HourlyWeather hourly_weather = 4;
+}
+
+// A reusable container for multiple days or arbitrary hourly ranges.
+message HourlyWeatherDataset {
+	// Data source or model name.
+	string source = 1;
+	// Dataset generation timestamp encoded as ISO 8601.
+	string generated_at = 2;
+	// Ordered daily weather collections.
+	repeated DailyHourlyWeather daily_weather = 3;
+}

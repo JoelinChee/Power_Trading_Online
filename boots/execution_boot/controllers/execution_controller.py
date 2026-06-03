@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from boots.execution_boot.services.execution_service import ExecutionService, get_execution_service
+from boots.execution_boot.services.execution_service import get_execution_service
 from common.schemas import (
     RiskCheckRequest,
     RiskCheckResponse,

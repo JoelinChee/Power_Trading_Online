@@ -52,6 +52,6 @@ if [[ -n "$stale_service_pids" ]]; then
     echo "$stale_service_pids" | xargs kill -9
 fi
 
-"$SCRIPT_DIR/stop_local_kafka.sh"
+bash "$SCRIPT_DIR/stop_local_kafka.sh"
 
 echo "All services stopped"

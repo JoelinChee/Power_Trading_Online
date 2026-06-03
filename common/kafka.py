@@ -121,11 +121,20 @@ class KafkaConsumerWorker:
     def stop(self) -> None:
         """Stop the polling loop and close the consumer cleanly."""
         self._stop_event.set()
-        if self._consumer is not None:
-            self._consumer.close()
-            self._consumer = None
+        logger.warning(
+            "Stopping Kafka consumer worker service=%s group=%s topic_suffix=%s",
+            self.settings.service_name,
+            self.settings.consumer_group(self.group_suffix),
+            self.topic_suffix,
+        )
         if self._thread is not None:
             self._thread.join(timeout=5.0)
+            if self._thread.is_alive():
+                logger.warning(
+                    "Kafka consumer worker did not stop in time service=%s group=%s",
+                    self.settings.service_name,
+                    self.settings.consumer_group(self.group_suffix),
+                )
             self._thread = None
 
     def _run(self) -> None:
@@ -140,6 +149,13 @@ class KafkaConsumerWorker:
         )
         topic = self.settings.topic_name(self.topic_suffix)
         self._consumer.subscribe([topic])
+        logger.warning(
+            "Kafka consumer worker started service=%s group=%s topic=%s bootstrap=%s",
+            self.settings.service_name,
+            self.settings.consumer_group(self.group_suffix),
+            topic,
+            self.settings.kafka_bootstrap_servers,
+        )
 
         try:
             while not self._stop_event.is_set():
@@ -147,6 +163,13 @@ class KafkaConsumerWorker:
                 if message is None:
                     continue
                 if message.error():
+                    logger.warning(
+                        "Kafka poll returned error service=%s group=%s topic=%s error=%s",
+                        self.settings.service_name,
+                        self.settings.consumer_group(self.group_suffix),
+                        topic,
+                        message.error(),
+                    )
                     if KafkaError is not None:
                         error_code = message.error().code()
                         if error_code == KafkaError._PARTITION_EOF:
@@ -160,6 +183,13 @@ class KafkaConsumerWorker:
                             continue
                     logger.error("Kafka consume error on topic=%s error=%s", topic, message.error())
                     continue
+                logger.warning(
+                    "Kafka message received service=%s group=%s topic=%s bytes=%s",
+                    self.settings.service_name,
+                    self.settings.consumer_group(self.group_suffix),
+                    topic,
+                    len(message.value() or b""),
+                )
                 self.handler(message.value())
         except Exception:  # pragma: no cover
             logger.exception("Kafka consumer worker crashed for service=%s topic=%s", self.settings.service_name, topic)

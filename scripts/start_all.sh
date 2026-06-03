@@ -22,10 +22,10 @@ if [[ ! -f "$REPO_ROOT/.env" ]]; then
 fi
 
 # Compile protobuf definitions first so every service can import the generated module.
-"$SCRIPT_DIR/compile_protos.sh"
+bash "$SCRIPT_DIR/compile_protos.sh"
 
 # Start the local Kafka broker used by the three boot services.
-"$SCRIPT_DIR/start_local_kafka.sh"
+bash "$SCRIPT_DIR/start_local_kafka.sh"
 
 # Wait until the Kafka broker socket is reachable before starting any service.
 for _ in {1..40}; do

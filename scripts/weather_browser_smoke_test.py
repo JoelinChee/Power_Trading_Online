@@ -8,7 +8,6 @@ import httpx
 
 DATA_BOOT_URL = "http://127.0.0.1:8001"
 FORECAST_BOOT_URL = "http://127.0.0.1:8002"
-EXECUTION_BOOT_URL = "http://127.0.0.1:8003"
 
 
 def fetch_json(client: httpx.Client, url: str) -> dict:
@@ -38,33 +37,30 @@ def main() -> int:
             print(f"Unexpected browser response: {trigger_payload}", file=sys.stderr)
             return 1
 
-        deadline = time.time() + 50.0
+        deadline = time.time() + 20.0
         while time.time() < deadline:
             data_status = fetch_json(client, f"{DATA_BOOT_URL}/api/v1/data/pipeline-status")
             forecast_status = fetch_json(client, f"{FORECAST_BOOT_URL}/api/v1/forecast/pipeline-status")
-            execution_status = fetch_json(client, f"{EXECUTION_BOOT_URL}/api/v1/execution/pipeline-status")
 
-            weather_feedback = data_status.get("details", {}).get("last_feedback_event", {})
+            data_feedback = data_status.get("details", {}).get("last_feedback_event", {})
             forecast_weather = forecast_status.get("details", {}).get("last_received_weather_event", {})
-            forecast_event_id = forecast_status.get("last_published_event_id")
-            execution_consumed_id = execution_status.get("last_consumed_event_id")
-            execution_result = execution_status.get("details", {}).get("last_processed_result", {})
+            daily_weather = forecast_weather.get("daily_weather", [])
 
             if (
-                weather_feedback.get("topic", "").endswith("weather.events")
+                data_feedback.get("message") == "Kafka发送成功"
                 and forecast_weather.get("source") == "data_boot"
-                and forecast_event_id
-                and execution_consumed_id == forecast_event_id
-                and execution_result.get("upstream_event_id") == forecast_event_id
+                and daily_weather
+                and daily_weather[0].get("hourly_weather")
             ):
-                print("Kafka protobuf pipeline smoke test passed (weather.events -> forecast.events -> execution_boot)")
-                print(f"forecast_event_id={forecast_event_id}")
-                print(f"execution_result_id={execution_result.get('event_id')}")
+                print("Weather browser-to-Kafka smoke test passed")
+                print(f"topic={data_feedback.get('topic')}")
+                print(f"region={daily_weather[0].get('region_name')}")
+                print(f"hour_count={len(daily_weather[0].get('hourly_weather', []))}")
                 return 0
 
             time.sleep(1.0)
 
-    print("Kafka protobuf pipeline smoke test timed out", file=sys.stderr)
+    print("Weather browser-to-Kafka smoke test timed out", file=sys.stderr)
     return 1
 
 

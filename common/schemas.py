@@ -53,15 +53,6 @@ class DataIngestionRequest(BaseModel):
     renewable: RenewableSnapshot = Field(..., description="Current renewable generation observation payload.")
 
 
-class ForecastPipelineRequest(DataIngestionRequest):
-    """Internal request that forwards an ingested snapshot to forecast boot."""
-
-    upstream_event_id: str = Field(..., description="Identifier of the source ingestion event created by data boot.")
-    source_service: str = Field(..., description="Name of the upstream service that forwarded the request.")
-    published_at: str = Field(..., description="Publication timestamp copied from the source data snapshot.")
-    target_date: str = Field(..., description="Trading date derived from the source load timestamp.")
-
-
 class PipelineStatusResponse(BaseModel):
     """Debugging view that summarizes recent event activity for one service."""
 
@@ -72,31 +63,11 @@ class PipelineStatusResponse(BaseModel):
     details: Dict[str, object] = Field(default_factory=dict, description="Expanded debugging payload that includes the latest serialized event content.")
 
 
-class ForecastRequest(BaseModel):
-    """Request model used by the synchronous forecast demonstration APIs."""
-
-    target_date: str = Field(..., description="Target trading date for the generated forecast horizon.")
-    enterprise_id: str = Field(default="default-enterprise", description="Enterprise identifier that owns the forecast request.")
-    base_load_mw: float = Field(default=68.0, description="Base load value used to synthesize the 96-point load forecast curve.")
-    base_price: float = Field(default=415.0, description="Base market price used to synthesize the 96-point price forecast curve.")
-    weather_type: str = Field(default="cloudy", description="Weather category used by the weather forecast demonstration endpoint.")
-
-
 class SeriesPoint(BaseModel):
     """Single point in a 96-slot day-ahead forecast series."""
 
     slot: int = Field(..., ge=1, le=96, description="Quarter-hour slot number in the 96-point daily forecast horizon.")
     value: float = Field(..., description="Forecasted metric value associated with the slot.")
-
-
-class ForecastResponse(BaseModel):
-    """Response model returned by the forecast demonstration APIs."""
-
-    target_date: str = Field(..., description="Target trading date for the forecast horizon.")
-    enterprise_id: str = Field(..., description="Enterprise identifier associated with the forecast.")
-    metric: str = Field(..., description="Name of the forecasted metric, such as load or price.")
-    horizon: int = Field(default=96, description="Number of quarter-hour points included in the forecast response.")
-    points: List[SeriesPoint] = Field(..., description="Ordered list of quarter-hour forecast points.")
 
 
 class RiskCheckRequest(BaseModel):

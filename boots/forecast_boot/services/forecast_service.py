@@ -1,100 +1,46 @@
 from __future__ import annotations
 
-import threading
-from collections import deque
+import logging
 from functools import lru_cache
 from uuid import uuid4
 
 from google.protobuf.json_format import MessageToDict
 
 from common.config import ForecastBootSettings
-from common.kafka import KafkaPublisher
-from common.proto_loader import trading_messages_pb2
-from common.schemas import DataIngestionRequest, ForecastPipelineRequest, ForecastRequest, ForecastResponse, PipelineStatusResponse, SeriesPoint
-from common.timer import PeriodicWorker
+from common.kafka import KafkaConsumerWorker, KafkaPublisher
+from common.proto_loader import trading_messages_pb2, weather_pb2
+from common.schemas import PipelineStatusResponse, SeriesPoint
+
+
+logger = logging.getLogger(__name__)
 
 
 class ForecastService:
-    """Service layer for HTTP forecast APIs and Kafka-backed forecast publication."""
+    """Service layer for weather-topic consumption and forecast-topic publication."""
 
     def __init__(self) -> None:
         self.settings = ForecastBootSettings(host="0.0.0.0", port=8002)
         self.publisher = KafkaPublisher(self.settings)
-        self._pending_requests: deque[ForecastPipelineRequest] = deque()
-        self._pending_lock = threading.Lock()
-        self._timer_worker = PeriodicWorker(
-            name=f"{self.settings.service_name}-timer",
-            interval_seconds=self.settings.timer_interval_seconds,
-            callback=self._flush_pending_requests,
+        self.weather_consumer = KafkaConsumerWorker(
+            settings=self.settings,
+            topic_suffix="weather.events",
+            group_suffix="weather",
+            handler=self._handle_weather_event,
         )
         self.last_received_event: dict[str, object] | None = None
+        self.last_received_weather_event: dict[str, object] | None = None
         self.last_published_event: dict[str, object] | None = None
 
-    def forecast_weather(self, request: ForecastRequest) -> dict[str, object]:
-        """Return a simple synchronous weather forecast for direct API calls.
-
-        Args:
-            request: Forecast request submitted through the HTTP endpoint.
-
-        Returns:
-            A summarized weather forecast payload for manual invocation flows.
-        """
-        response = {
-            "target_date": request.target_date,
-            "enterprise_id": request.enterprise_id,
-            "weather_type": request.weather_type,
-            "temperature_range": [27.5, 33.8],
-            "rain_probability": 0.22,
-            "wind_speed_range": [3.2, 7.5],
-        }
-        return response
-
-    def forecast_load(self, request: ForecastRequest) -> ForecastResponse:
-        """Build a mock 96-point enterprise load curve for direct API calls."""
-        points = []
-        for slot in range(1, 97):
-            peak_factor = 1.18 if 33 <= slot <= 76 else 0.92
-            intra_day_adjustment = ((slot % 12) - 6) * 0.35
-            value = round(request.base_load_mw * peak_factor + intra_day_adjustment, 2)
-            points.append(SeriesPoint(slot=slot, value=value))
-
-        response = ForecastResponse(
-            target_date=request.target_date,
-            enterprise_id=request.enterprise_id,
-            metric="load_mw",
-            points=points,
-        )
-        return response
-
-    def forecast_price(self, request: ForecastRequest) -> ForecastResponse:
-        """Build a mock 96-point power price curve for direct API calls."""
-        points = []
-        for slot in range(1, 97):
-            demand_factor = 1.12 if 29 <= slot <= 80 else 0.95
-            volatility = ((slot % 8) - 4) * 1.8
-            value = round(request.base_price * demand_factor + volatility, 2)
-            points.append(SeriesPoint(slot=slot, value=value))
-
-        response = ForecastResponse(
-            target_date=request.target_date,
-            enterprise_id=request.enterprise_id,
-            metric="price_cny_per_mwh",
-            points=points,
-        )
-        return response
-
     def start_pipeline(self) -> None:
-        """Start the timer-driven forecast publication worker."""
-        self._timer_worker.start()
+        """Start the weather topic consumer."""
+        self.weather_consumer.start()
 
     def stop_pipeline(self) -> None:
-        """Stop the timer-driven forecast publication worker."""
-        self._timer_worker.stop()
+        """Stop the weather topic consumer."""
+        self.weather_consumer.stop()
 
     def get_pipeline_status(self) -> PipelineStatusResponse:
-        """Return the latest received source payload and published forecast event."""
-        with self._pending_lock:
-            pending_request_count = len(self._pending_requests)
+        """Return latest consumed weather payload and published forecast payload."""
 
         return PipelineStatusResponse(
             service_name=self.settings.service_name,
@@ -102,76 +48,51 @@ class ForecastService:
             last_published_event_id=(self.last_published_event or {}).get("event_id"),
             details={
                 "last_received_event": self.last_received_event or {},
+                "last_received_weather_event": self.last_received_weather_event or {},
                 "last_published_event": self.last_published_event or {},
-                "pending_request_count": pending_request_count,
-                "timer_interval_seconds": self.settings.timer_interval_seconds,
             },
         )
 
-    def publish_forecast_event(self, request: ForecastPipelineRequest) -> dict[str, object]:
-        """Queue a forecast request that will be published on the next timer tick.
+    def _handle_weather_event(self, payload: bytes) -> None:
+        """Consume weather.events and publish one trading_messages ForecastEvent."""
 
-        Args:
-            request: Structured upstream payload forwarded by data boot.
-
-        Returns:
-            Queue acknowledgement for observability.
-        """
-        self.last_received_event = {
-            "upstream_event_id": request.upstream_event_id,
-            "source_service": request.source_service,
-            "published_at": request.published_at,
-            "target_date": request.target_date,
-            "enterprise_id": request.load.enterprise_id,
-            "weather": request.weather.model_dump(),
-            "load": request.load.model_dump(),
-            "price": request.price.model_dump(),
-            "renewable": request.renewable.model_dump(),
-        }
-
-        with self._pending_lock:
-            self._pending_requests.append(request)
-            pending_request_count = len(self._pending_requests)
-
-        return {
-            "accepted": True,
-            "message": "Forecast request queued",
-            "upstream_event_id": request.upstream_event_id,
-            "pending_request_count": pending_request_count,
-        }
-
-    def _flush_pending_requests(self) -> None:
-        """Publish all queued forecast requests on the current timer tick."""
-        with self._pending_lock:
-            pending_requests = list(self._pending_requests)
-            self._pending_requests.clear()
-
-        for request in pending_requests:
-            forecast_event = self._build_forecast_event(request)
-            self.publisher.publish_proto("forecast.events", forecast_event, key=request.load.enterprise_id)
-            self.last_published_event = MessageToDict(forecast_event, preserving_proto_field_name=True)
-
-    def _build_forecast_event(self, request: ForecastPipelineRequest) -> trading_messages_pb2.ForecastEvent:
-        """Create the protobuf forecast event for one queued source payload."""
-
-        weather_points, load_points, price_points = self._build_forecast_points(
-            DataIngestionRequest(
-                weather=request.weather,
-                load=request.load,
-                price=request.price,
-                renewable=request.renewable,
-            )
+        dataset = weather_pb2.HourlyWeatherDataset()
+        dataset.ParseFromString(payload)
+        logger.warning(
+            "forecast_boot weather handler invoked: source=%s generated_at=%s",
+            dataset.source,
+            dataset.generated_at,
         )
+        upstream_event_id = str(uuid4())
+        self.last_received_weather_event = MessageToDict(dataset, preserving_proto_field_name=True)
+        self.last_received_event = {
+            "upstream_event_id": upstream_event_id,
+            "source_service": dataset.source,
+            "published_at": dataset.generated_at,
+            "target_date": (dataset.daily_weather[0].target_date if dataset.daily_weather else ""),
+            "enterprise_id": (dataset.daily_weather[0].region_code if dataset.daily_weather else "default-enterprise"),
+        }
+
+        forecast_event = self._build_forecast_event(dataset=dataset, upstream_event_id=upstream_event_id)
+        self.publisher.publish_proto("forecast.events", forecast_event, key=forecast_event.enterprise_id)
+        self.last_published_event = MessageToDict(forecast_event, preserving_proto_field_name=True)
+        logger.warning("forecast_boot published forecast event_id=%s", forecast_event.event_id)
+
+    def _build_forecast_event(
+        self, dataset: weather_pb2.HourlyWeatherDataset, upstream_event_id: str
+    ) -> trading_messages_pb2.ForecastEvent:
+        """Create one ForecastEvent from an incoming weather dataset."""
+        weather_points, load_points, price_points, weather_type, target_date, enterprise_id, published_at, renewable_mw = self._build_forecast_points(dataset)
 
         forecast_event = trading_messages_pb2.ForecastEvent()
         forecast_event.event_id = str(uuid4())
         forecast_event.source_service = self.settings.service_name
-        forecast_event.upstream_event_id = request.upstream_event_id
-        forecast_event.published_at = request.published_at
-        forecast_event.enterprise_id = request.load.enterprise_id
-        forecast_event.target_date = request.target_date
-        forecast_event.weather_type = request.weather.weather_type
-        forecast_event.available_renewable_mw = request.renewable.wind_output_mw + request.renewable.solar_output_mw
+        forecast_event.upstream_event_id = upstream_event_id
+        forecast_event.published_at = published_at
+        forecast_event.enterprise_id = enterprise_id
+        forecast_event.target_date = target_date
+        forecast_event.weather_type = weather_type
+        forecast_event.available_renewable_mw = renewable_mw
 
         for point in weather_points:
             proto_point = forecast_event.weather_points.add()
@@ -190,27 +111,47 @@ class ForecastService:
 
         return forecast_event
 
-    def _build_forecast_points(self, request: DataIngestionRequest) -> tuple[list[SeriesPoint], list[SeriesPoint], list[SeriesPoint]]:
-        """Build synthetic weather, load, and price series from one source snapshot."""
-        weather_points = []
-        load_points = []
-        price_points = []
+    def _build_forecast_points(
+        self, dataset: weather_pb2.HourlyWeatherDataset
+    ) -> tuple[list[SeriesPoint], list[SeriesPoint], list[SeriesPoint], str, str, str, str, float]:
+        """Build synthetic weather/load/price forecast points from one weather dataset."""
+        weather_points: list[SeriesPoint] = []
+        load_points: list[SeriesPoint] = []
+        price_points: list[SeriesPoint] = []
+
+        daily = dataset.daily_weather[0] if dataset.daily_weather else None
+        hourly = list(daily.hourly_weather) if daily and daily.hourly_weather else []
+
+        weather_type = hourly[0].condition_text if hourly else "unknown"
+        target_date = daily.target_date if daily else (dataset.generated_at[:10] if dataset.generated_at else "")
+        enterprise_id = daily.region_code if daily else "default-enterprise"
+        published_at = dataset.generated_at
+
+        base_temp = hourly[0].temperature_celsius if hourly else 28.0
+        base_wind = hourly[0].wind.speed_mps if hourly else 4.0
+        base_load = 60.0 + max(base_temp - 20.0, 0.0) * 1.2
+        base_price = 420.0 + max(base_temp - 24.0, 0.0) * 2.8
+        renewable_mw = round((base_wind * 2.2) + (hourly[0].solar_irradiance_wm2 / 40.0 if hourly else 8.0), 2)
 
         for slot in range(1, 97):
+            source_hour = hourly[(slot - 1) % len(hourly)] if hourly else None
+            weather_seed = source_hour.temperature_celsius if source_hour else base_temp
+
             weather_adjustment = ((slot % 16) - 8) * 0.18
-            weather_value = round(request.weather.temperature_celsius + weather_adjustment, 2)
+            weather_value = round(weather_seed + weather_adjustment, 2)
             weather_points.append(SeriesPoint(slot=slot, value=weather_value))
 
             peak_factor = 1.18 if 33 <= slot <= 76 else 0.92
             intra_day_adjustment = ((slot % 12) - 6) * 0.35
-            load_value = round(request.load.load_mw * peak_factor + intra_day_adjustment, 2)
+            load_value = round(base_load * peak_factor + intra_day_adjustment, 2)
             load_points.append(SeriesPoint(slot=slot, value=load_value))
 
             demand_factor = 1.12 if 29 <= slot <= 80 else 0.95
             volatility = ((slot % 8) - 4) * 1.8
-            price_value = round(request.price.spot_price * demand_factor + volatility, 2)
+            price_value = round(base_price * demand_factor + volatility, 2)
             price_points.append(SeriesPoint(slot=slot, value=price_value))
-        return weather_points, load_points, price_points
+
+        return weather_points, load_points, price_points, weather_type, target_date, enterprise_id, published_at, renewable_mw
 
 
 @lru_cache(maxsize=1)
