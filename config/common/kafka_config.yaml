@@ -1,0 +1,8 @@
+kafka:
+  kafka_global_env: dev
+  kafka_bootstrap_servers: localhost:9092
+  kafka_client_id: power-trading-platform
+  kafka_enabled: true
+  kafka_consumer_group_prefix: power_trading
+  kafka_consumer_group_salt: ""
+  kafka_auto_offset_reset: earliest

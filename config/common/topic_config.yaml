@@ -1,0 +1,11 @@
+topic:
+  data_boot_to_forecast_boot:
+    from_boot: data_boot
+    to_boot: forecast_boot
+    topic_name: power_trading.weather.events
+    proto_name: weather_pb2
+  forecast_boot_to_execution_boot:
+    from_boot: forecast_boot
+    to_boot: execution_boot
+    topic_name: power_trading.forecast.events
+    proto_name: trading_messages_pb2

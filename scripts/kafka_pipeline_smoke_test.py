@@ -2,13 +2,24 @@ from __future__ import annotations
 
 import sys
 import time
+from pathlib import Path
 
 import httpx
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from common.config_loader import DataBootSettings, ExecutionBootSettings, ForecastBootSettings
 
 
 DATA_BOOT_URL = "http://127.0.0.1:8001"
 FORECAST_BOOT_URL = "http://127.0.0.1:8002"
 EXECUTION_BOOT_URL = "http://127.0.0.1:8003"
+WEATHER_TOPIC = DataBootSettings().topic_name("data_boot", "forecast_boot")
+FORECAST_TOPIC = ForecastBootSettings().topic_name("forecast_boot", "execution_boot")
+EXECUTION_TOPIC = ExecutionBootSettings().topic_name("forecast_boot", "execution_boot")
 
 
 def fetch_json(client: httpx.Client, url: str) -> dict:
@@ -51,13 +62,13 @@ def main() -> int:
             execution_result = execution_status.get("details", {}).get("last_processed_result", {})
 
             if (
-                weather_feedback.get("topic", "").endswith("weather.events")
+                weather_feedback.get("topic") == WEATHER_TOPIC
                 and forecast_weather.get("source") == "data_boot"
                 and forecast_event_id
                 and execution_consumed_id == forecast_event_id
                 and execution_result.get("upstream_event_id") == forecast_event_id
             ):
-                print("Kafka protobuf pipeline smoke test passed (weather.events -> forecast.events -> execution_boot)")
+                print(f"Kafka protobuf pipeline smoke test passed ({WEATHER_TOPIC} -> {FORECAST_TOPIC} -> {EXECUTION_TOPIC})")
                 print(f"forecast_event_id={forecast_event_id}")
                 print(f"execution_result_id={execution_result.get('event_id')}")
                 return 0

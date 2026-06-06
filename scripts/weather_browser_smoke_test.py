@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import sys
 import time
+from pathlib import Path
 
 import httpx
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from common.config_loader import DataBootSettings
+
+
 DATA_BOOT_URL = "http://127.0.0.1:8001"
 FORECAST_BOOT_URL = "http://127.0.0.1:8002"
+WEATHER_TOPIC = DataBootSettings().topic_name("data_boot", "forecast_boot")
 
 
 def fetch_json(client: httpx.Client, url: str) -> dict:
@@ -53,7 +62,7 @@ def main() -> int:
                 and daily_weather[0].get("hourly_weather")
             ):
                 print("Weather browser-to-Kafka smoke test passed")
-                print(f"topic={data_feedback.get('topic')}")
+                print(f"topic={WEATHER_TOPIC}")
                 print(f"region={daily_weather[0].get('region_name')}")
                 print(f"hour_count={len(daily_weather[0].get('hourly_weather', []))}")
                 return 0

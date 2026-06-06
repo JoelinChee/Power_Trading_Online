@@ -17,7 +17,7 @@ except ImportError:  # pragma: no cover
     KafkaError = None
     Producer = None
 
-from common.config import BaseBootSettings
+from common.config_loader import BaseBootSettings
 
 
 logger = logging.getLogger(__name__)
@@ -57,22 +57,20 @@ class KafkaPublisher:
             }
         )
 
-    def publish_proto(self, topic_suffix: str, payload: object, key: Optional[str] = None) -> None:
+    def publish_proto(self, topic_name: str, payload: object, key: Optional[str] = None) -> None:
         """Publish a compiled protobuf message to Kafka.
 
         Args:
-            topic_suffix: Logical topic suffix that will be expanded into the
-                fully qualified topic name.
+            topic_name: Fully qualified Kafka topic name loaded from config.
             payload: Compiled protobuf message instance that exposes
                 `SerializeToString`.
             key: Optional Kafka record key used for partition affinity.
         """
         if self._producer is None:
-            logger.info("Skip publish topic=%s payload=%s", topic_suffix, payload)
+            logger.info("Skip publish topic=%s payload=%s", topic_name, payload)
             return
 
-        topic = self.settings.topic_name(topic_suffix)
-        self._producer.produce(topic=topic, key=key, value=payload.SerializeToString())
+        self._producer.produce(topic=topic_name, key=key, value=payload.SerializeToString())
         self._producer.flush(2.0)
 
 
@@ -89,12 +87,12 @@ class KafkaConsumerWorker:
     def __init__(
         self,
         settings: BaseBootSettings,
-        topic_suffix: str,
+        topic_name: str,
         group_suffix: str,
         handler: Callable[[bytes], None],
     ) -> None:
         self.settings = settings
-        self.topic_suffix = topic_suffix
+        self.topic_name = topic_name
         self.group_suffix = group_suffix
         self.handler = handler
         self._thread: Optional[threading.Thread] = None
@@ -125,7 +123,7 @@ class KafkaConsumerWorker:
             "Stopping Kafka consumer worker service=%s group=%s topic_suffix=%s",
             self.settings.service_name,
             self.settings.consumer_group(self.group_suffix),
-            self.topic_suffix,
+            self.topic_name,
         )
         if self._thread is not None:
             self._thread.join(timeout=5.0)
@@ -147,7 +145,7 @@ class KafkaConsumerWorker:
                 "auto.offset.reset": self.settings.kafka_auto_offset_reset,
             }
         )
-        topic = self.settings.topic_name(self.topic_suffix)
+        topic = self.topic_name
         self._consumer.subscribe([topic])
         logger.warning(
             "Kafka consumer worker started service=%s group=%s topic=%s bootstrap=%s",
