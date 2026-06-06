@@ -11,15 +11,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from common.config_loader import DataBootSettings, ExecutionBootSettings, ForecastBootSettings
+from common.loaders.topic_loader import TopicConfigLoader
 
 
 DATA_BOOT_URL = "http://127.0.0.1:8001"
 FORECAST_BOOT_URL = "http://127.0.0.1:8002"
 EXECUTION_BOOT_URL = "http://127.0.0.1:8003"
-WEATHER_TOPIC = DataBootSettings().topic_name("data_boot", "forecast_boot")
-FORECAST_TOPIC = ForecastBootSettings().topic_name("forecast_boot", "execution_boot")
-EXECUTION_TOPIC = ExecutionBootSettings().topic_name("forecast_boot", "execution_boot")
+WEATHER_TOPIC = TopicConfigLoader.topic_name("data_boot", "forecast_boot")
+FORECAST_TOPIC = TopicConfigLoader.topic_name("forecast_boot", "execution_boot")
+EXECUTION_TOPIC = TopicConfigLoader.topic_name("forecast_boot", "execution_boot")
 
 
 def fetch_json(client: httpx.Client, url: str) -> dict:

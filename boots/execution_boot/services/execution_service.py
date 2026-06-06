@@ -4,7 +4,9 @@ import logging
 from functools import lru_cache
 
 from boots.execution_boot.services.algo import ExecutionAlgo
-from common.config_loader import ExecutionBootSettings
+from common.loaders.boots_loader import BootsConfigLoader
+from common.loaders.kafka_loader import KafkaConfigLoader, KafkaRuntimeSettings
+from common.loaders.topic_loader import TopicConfigLoader
 from common.kafka import KafkaConsumerWorker
 from common.schemas import (
     PipelineStatusResponse,
@@ -22,11 +24,18 @@ class ExecutionService:
     """Service layer for synchronous execution APIs and forecast topic consumption."""
 
     def __init__(self) -> None:
-        self.settings = ExecutionBootSettings()
-        self.algo = ExecutionAlgo(settings=self.settings, logger=logger)
+        self.boot_config = BootsConfigLoader.get_boot("execution_boot")
+        self.kafka_config = KafkaConfigLoader.get_kafka()
+        self.kafka_settings = KafkaRuntimeSettings(
+            service_name=self.boot_config["service_name"],
+            kafka_config=self.kafka_config,
+        )
+        self.forecast_topic_name = TopicConfigLoader.topic_name("forecast_boot", "execution_boot")
+
+        self.algo = ExecutionAlgo(service_name=self.boot_config["service_name"], logger=logger)
         self.forecast_consumer = KafkaConsumerWorker(
-            settings=self.settings,
-            topic_name=self.settings.topic_name("forecast_boot", "execution_boot"),
+            settings=self.kafka_settings,
+            topic_name=self.forecast_topic_name,
             group_suffix="decision",
             handler=self._handle_forecast_event,
         )
@@ -59,7 +68,7 @@ class ExecutionService:
         """Return latest consumed forecast event and processed execution result."""
 
         return PipelineStatusResponse(
-            service_name=self.settings.service_name,
+            service_name=self.boot_config["service_name"],
             last_consumed_event_id=(self.algo.last_consumed_event or {}).get("event_id"),
             last_published_event_id=(self.algo.last_processed_result or {}).get("event_id"),
             details={

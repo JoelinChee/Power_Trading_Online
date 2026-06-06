@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 
 from google.protobuf.json_format import MessageToDict
 
-from common.config_loader import DataBootSettings
 from common.kafka import KafkaPublisher
 from common.proto_loader import weather_pb2
 from common.schemas import DataIngestionRequest
@@ -13,8 +12,9 @@ from common.schemas import DataIngestionRequest
 class DataAlgo:
     """Algorithm layer for data shaping and weather event publication."""
 
-    def __init__(self, settings: DataBootSettings, publisher: KafkaPublisher) -> None:
-        self.settings = settings
+    def __init__(self, service_name: str, weather_topic_name: str, publisher: KafkaPublisher) -> None:
+        self.service_name = service_name
+        self.weather_topic_name = weather_topic_name
         self.publisher = publisher
         self.last_published_event: dict[str, object] | None = None
         self.last_feedback_event: dict[str, object] | None = None
@@ -50,13 +50,12 @@ class DataAlgo:
         """Build one sample hourly weather dataset and publish it to Kafka."""
 
         dataset = self._build_hourly_weather_dataset()
-        topic_name = self.settings.topic_name("data_boot", "forecast_boot")
-        self.publisher.publish_proto(topic_name, dataset, key=dataset.daily_weather[0].region_code)
+        self.publisher.publish_proto(self.weather_topic_name, dataset, key=dataset.daily_weather[0].region_code)
         self.last_published_event = MessageToDict(dataset, preserving_proto_field_name=True)
         self.last_feedback_event = {
             "accepted": True,
             "message": "Kafka发送成功",
-            "topic": topic_name,
+            "topic": self.weather_topic_name,
             "generated_at": dataset.generated_at,
             "target_service": "forecast_boot",
         }
@@ -66,7 +65,7 @@ class DataAlgo:
         """Accept an ingestion request without publishing to Kafka topics."""
 
         self.last_published_event = {
-            "source_service": self.settings.service_name,
+            "source_service": self.service_name,
             "published_at": request.load.timestamp,
             "enterprise_id": request.load.enterprise_id,
             "target_date": request.load.timestamp[:10],
@@ -91,7 +90,7 @@ class DataAlgo:
 
         base_time = datetime.now(timezone(timedelta(hours=8))).replace(minute=0, second=0, microsecond=0)
         dataset = weather_pb2.HourlyWeatherDataset()
-        dataset.source = self.settings.service_name
+        dataset.source = self.service_name
         dataset.generated_at = base_time.isoformat()
 
         daily_weather = dataset.daily_weather.add()

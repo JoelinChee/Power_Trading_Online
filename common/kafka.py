@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Callable, Optional
+from typing import Any, Callable, Optional, Protocol
 
 try:
     from confluent_kafka import Consumer, KafkaError, Producer
@@ -17,7 +17,16 @@ except ImportError:  # pragma: no cover
     KafkaError = None
     Producer = None
 
-from common.config_loader import BaseBootSettings
+
+class KafkaSettingsProtocol(Protocol):
+    service_name: str
+    kafka_enabled: bool
+    kafka_bootstrap_servers: str
+    kafka_client_id: str
+    kafka_auto_offset_reset: str
+
+    def consumer_group(self, group_suffix: str) -> str:
+        ...
 
 
 logger = logging.getLogger(__name__)
@@ -31,11 +40,11 @@ class KafkaPublisher:
             client identifiers, and topic naming rules.
     """
 
-    def __init__(self, settings: BaseBootSettings) -> None:
+    def __init__(self, settings: KafkaSettingsProtocol) -> None:
         self.settings = settings
         self._producer = self._build_producer()
 
-    def _build_producer(self) -> Optional[Producer]:
+    def _build_producer(self) -> Optional[Any]:
         """Create the underlying `confluent-kafka` producer if Kafka is enabled.
 
         Returns:
@@ -86,7 +95,7 @@ class KafkaConsumerWorker:
 
     def __init__(
         self,
-        settings: BaseBootSettings,
+        settings: KafkaSettingsProtocol,
         topic_name: str,
         group_suffix: str,
         handler: Callable[[bytes], None],
@@ -97,7 +106,7 @@ class KafkaConsumerWorker:
         self.handler = handler
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
-        self._consumer: Optional[Consumer] = None
+        self._consumer: Optional[Any] = None
 
     def start(self) -> None:
         """Start the background polling thread exactly once."""

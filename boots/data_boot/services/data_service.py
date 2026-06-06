@@ -3,7 +3,9 @@ from __future__ import annotations
 from functools import lru_cache
 
 from boots.data_boot.services.algo import DataAlgo
-from common.config_loader import DataBootSettings
+from common.loaders.boots_loader import BootsConfigLoader
+from common.loaders.kafka_loader import KafkaConfigLoader, KafkaRuntimeSettings
+from common.loaders.topic_loader import TopicConfigLoader
 from common.kafka import KafkaPublisher
 from common.schemas import DataIngestionRequest, PipelineStatusResponse
 
@@ -12,9 +14,19 @@ class DataService:
     """Service layer for data acquisition and forecast dispatch handling."""
 
     def __init__(self) -> None:
-        self.settings = DataBootSettings()
-        self.publisher = KafkaPublisher(self.settings)
-        self.algo = DataAlgo(settings=self.settings, publisher=self.publisher)
+        self.boot_config = BootsConfigLoader.get_boot("data_boot")
+        self.kafka_config = KafkaConfigLoader.get_kafka()
+        self.kafka_settings = KafkaRuntimeSettings(
+            service_name=self.boot_config["service_name"],
+            kafka_config=self.kafka_config,
+        )
+        self.weather_topic_name = TopicConfigLoader.topic_name("data_boot", "forecast_boot")
+        self.publisher = KafkaPublisher(self.kafka_settings)
+        self.algo = DataAlgo(
+            service_name=self.boot_config["service_name"],
+            weather_topic_name=self.weather_topic_name,
+            publisher=self.publisher,
+        )
 
     def get_current_snapshot(self) -> dict[str, object]:
         """Return a mock real-time snapshot for manual API inspection."""
@@ -50,7 +62,7 @@ class DataService:
     def get_pipeline_status(self) -> PipelineStatusResponse:
         """Expose the latest accepted source event and forwarded forecast event."""
         return PipelineStatusResponse(
-            service_name=self.settings.service_name,
+            service_name=self.boot_config["service_name"],
             last_published_event_id=(self.algo.last_published_event or {}).get("event_id"),
             last_feedback_event_id=(self.algo.last_feedback_event or {}).get("upstream_event_id") or (self.algo.last_feedback_event or {}).get("event_id"),
             details={

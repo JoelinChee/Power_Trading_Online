@@ -6,7 +6,6 @@ from uuid import uuid4
 
 from google.protobuf.json_format import MessageToDict
 
-from common.config_loader import ForecastBootSettings
 from common.kafka import Consumer, KafkaError, KafkaPublisher
 from common.proto_loader import trading_messages_pb2, weather_pb2
 from common.schemas import SeriesPoint
@@ -17,15 +16,29 @@ class ForecastAlgo:
 
 	def __init__(
 		self,
-		settings: ForecastBootSettings,
+		service_name: str,
+		timer_interval_seconds: float,
+		kafka_enabled: bool,
+		kafka_bootstrap_servers: str,
+		kafka_client_id: str,
+		kafka_auto_offset_reset: str,
+		weather_consumer_group: str,
+		weather_topic_name: str,
+		forecast_topic_name: str,
 		publisher: KafkaPublisher,
 		logger: logging.Logger,
 	) -> None:
-		self.settings = settings
+		self.service_name = service_name
+		self.timer_interval_seconds = timer_interval_seconds
+		self.kafka_enabled = kafka_enabled
+		self.kafka_bootstrap_servers = kafka_bootstrap_servers
+		self.kafka_client_id = kafka_client_id
+		self.kafka_auto_offset_reset = kafka_auto_offset_reset
+		self.weather_consumer_group = weather_consumer_group
 		self.publisher = publisher
 		self.logger = logger
-		self.weather_topic = self.settings.topic_name("data_boot", "forecast_boot")
-		self.forecast_topic = self.settings.topic_name("forecast_boot", "execution_boot")
+		self.weather_topic = weather_topic_name
+		self.forecast_topic = forecast_topic_name
 		self.weather_consumer: Consumer | None = None
 
 		self.last_received_event: dict[str, object] | None = None
@@ -45,8 +58,8 @@ class ForecastAlgo:
 		consumer = self._get_or_create_weather_consumer()
 		self.logger.warning(
 			"forecast_boot fixed-rate tick service=%s interval_seconds=%s",
-			self.settings.service_name,
-			self.settings.timer_interval_seconds,
+			self.service_name,
+			self.timer_interval_seconds,
 		)
 		if consumer is None:
 			self.logger.warning("Consumer is not available.")
@@ -58,9 +71,9 @@ class ForecastAlgo:
 			if message is None:
 				self.logger.warning(
 					"message is None for service=%s topic=%s interval_seconds=%s",
-					self.settings.service_name,
+					self.service_name,
 					self.weather_topic,
-					self.settings.timer_interval_seconds,
+					self.timer_interval_seconds,
 				)
 				break
 			if message.error():
@@ -70,12 +83,12 @@ class ForecastAlgo:
 					self.logger.info(
 						"Kafka topic=%s is not available yet for service=%s; waiting for topic auto-creation",
 						self.weather_topic,
-						self.settings.service_name,
+						self.service_name,
 					)
 					break
 				self.logger.warning(
 					"Kafka poll returned error service=%s topic=%s error=%s",
-					self.settings.service_name,
+					self.service_name,
 					self.weather_topic,
 					message.error(),
 				)
@@ -84,9 +97,9 @@ class ForecastAlgo:
 			payload = message.value()
 			self.logger.warning(
 				"message is available for service=%s topic=%s interval_seconds=%s",
-				self.settings.service_name,
+				self.service_name,
 				self.weather_topic,
-				self.settings.timer_interval_seconds,
+				self.timer_interval_seconds,
 			)
 			if not payload:
 				continue
@@ -98,20 +111,20 @@ class ForecastAlgo:
 			self.logger.warning(
 				"forecast_boot fixed-rate cycle processed_messages=%s interval_seconds=%s",
 				processed_messages,
-				self.settings.timer_interval_seconds,
+				self.timer_interval_seconds,
 			)
 		else:
 			self.logger.warning(
 				"forecast_boot fixed-rate cycle idle topic=%s interval_seconds=%s",
 				self.weather_topic,
-				self.settings.timer_interval_seconds,
+				self.timer_interval_seconds,
 			)
 
 	def _get_or_create_weather_consumer(self) -> Consumer | None:
 		"""Lazily create one Kafka consumer reused by the fixed-rate scheduler."""
 
-		if not self.settings.kafka_enabled:
-			self.logger.info("Kafka consumer disabled for service=%s", self.settings.service_name)
+		if not self.kafka_enabled:
+			self.logger.info("Kafka consumer disabled for service=%s", self.service_name)
 			return None
 
 		if Consumer is None:
@@ -123,18 +136,18 @@ class ForecastAlgo:
 
 		self.weather_consumer = Consumer(
 			{
-				"bootstrap.servers": self.settings.kafka_bootstrap_servers,
-				"group.id": self.settings.consumer_group("weather"),
-				"client.id": f"{self.settings.kafka_client_id}-{self.settings.service_name}",
-				"auto.offset.reset": self.settings.kafka_auto_offset_reset,
+				"bootstrap.servers": self.kafka_bootstrap_servers,
+				"group.id": self.weather_consumer_group,
+				"client.id": f"{self.kafka_client_id}-{self.service_name}",
+				"auto.offset.reset": self.kafka_auto_offset_reset,
 			}
 		)
 		self.weather_consumer.subscribe([self.weather_topic])
 		self.logger.warning(
 			"forecast_boot AsyncIOScheduler fixed-rate consumer subscribed group=%s topic=%s interval_seconds=%s",
-			self.settings.consumer_group("weather"),
+			self.weather_consumer_group,
 			self.weather_topic,
-			self.settings.timer_interval_seconds,
+			self.timer_interval_seconds,
 		)
 		return self.weather_consumer
 
@@ -191,7 +204,7 @@ class ForecastAlgo:
 
 		forecast_event = trading_messages_pb2.ForecastEvent()
 		forecast_event.event_id = str(uuid4())
-		forecast_event.source_service = self.settings.service_name
+		forecast_event.source_service = self.service_name
 		forecast_event.upstream_event_id = upstream_event_id
 		forecast_event.published_at = published_at
 		forecast_event.enterprise_id = enterprise_id

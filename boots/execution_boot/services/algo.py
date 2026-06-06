@@ -5,7 +5,6 @@ from uuid import uuid4
 
 from google.protobuf.json_format import MessageToDict
 
-from common.config_loader import ExecutionBootSettings
 from common.proto_loader import trading_messages_pb2
 from common.schemas import RiskCheckRequest, RiskCheckResponse, TradeOrderRequest, TradeOrderResponse
 
@@ -13,8 +12,8 @@ from common.schemas import RiskCheckRequest, RiskCheckResponse, TradeOrderReques
 class ExecutionAlgo:
     """Algorithm layer for risk evaluation and order generation."""
 
-    def __init__(self, settings: ExecutionBootSettings, logger: logging.Logger) -> None:
-        self.settings = settings
+    def __init__(self, service_name: str, logger: logging.Logger) -> None:
+        self.service_name = service_name
         self.logger = logger
         self.last_consumed_event: dict[str, object] | None = None
         self.last_processed_result: dict[str, object] | None = None
@@ -82,7 +81,7 @@ class ExecutionAlgo:
 
         result: dict[str, object] = {
             "event_id": str(uuid4()),
-            "source_service": self.settings.service_name,
+            "source_service": self.service_name,
             "upstream_event_id": event.event_id,
             "enterprise_id": event.enterprise_id,
             "target_date": event.target_date,

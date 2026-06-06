@@ -1,40 +1,50 @@
-"""Load compiled protobuf modules from the repository-local generated directory.
-
-The module names are driven by the repository configuration so application
-code does not need to hardcode generated pb2 module names.
-"""
-
 from __future__ import annotations
 
-import importlib
-import sys
-from types import ModuleType
+from pathlib import Path
+from typing import Any
 
-from common.config_loader import load_runtime_config
-from common.paths import GENERATED_PARENT_DIR, ensure_artifact_directories
+from common.loaders.loader_base import BaseConfigReader
 
 
-ensure_artifact_directories()
+class TopicConfigLoader(BaseConfigReader):
+    """Loader for topic and proto route settings from topic_config.yaml."""
 
-if str(GENERATED_PARENT_DIR) not in sys.path:
-    sys.path.insert(0, str(GENERATED_PARENT_DIR))
+    _default_config_path = Path(__file__).resolve().parents[2] / "config" / "common" / "topic_config.yaml"
+
+    @classmethod
+    def _load_routes(cls) -> dict[str, Any]:
+        loaded = cls.load_config_dict(cls._default_config_path)
+        routes = loaded.get("topic", {}) if isinstance(loaded.get("topic", {}), dict) else {}
+        return routes
+
+    @staticmethod
+    def _route_key(from_boot: str, to_boot: str) -> str:
+        return f"{from_boot}_to_{to_boot}"
+
+    @classmethod
+    def get_route(cls, from_boot: str, to_boot: str) -> dict[str, Any]:
+        routes = cls._load_routes()
+        route_key = cls._route_key(from_boot, to_boot)
+        route = routes.get(route_key)
+        if not isinstance(route, dict):
+            raise KeyError(f"Topic route not configured: {from_boot} -> {to_boot}")
+        return dict(route)
+
+    @classmethod
+    def topic_name(cls, from_boot: str, to_boot: str) -> str:
+        route = cls.get_route(from_boot, to_boot)
+        topic_name = route.get("topic_name")
+        if not isinstance(topic_name, str) or not topic_name:
+            raise KeyError(f"Topic name not configured: {from_boot} -> {to_boot}")
+        return topic_name
+
+    @classmethod
+    def proto_name(cls, from_boot: str, to_boot: str) -> str:
+        route = cls.get_route(from_boot, to_boot)
+        proto_name = route.get("proto_name")
+        if not isinstance(proto_name, str) or not proto_name:
+            raise KeyError(f"Proto name not configured: {from_boot} -> {to_boot}")
+        return proto_name
 
 
-def _load_proto_module(from_boot: str, to_boot: str) -> ModuleType:
-    runtime_config = load_runtime_config()
-    topic_routes = runtime_config.get("topic", {}) if isinstance(runtime_config.get("topic", {}), dict) else {}
-    route_key = f"{from_boot}_to_{to_boot}"
-    route = topic_routes.get(route_key)
-    module_name = route.get("proto_name") if isinstance(route, dict) else None
-
-    if not isinstance(module_name, str) or not module_name:
-        raise KeyError(f"Proto route not configured: {from_boot} -> {to_boot}")
-
-    return importlib.import_module(module_name)
-
-
-weather_pb2 = _load_proto_module("data_boot", "forecast_boot")
-trading_messages_pb2 = _load_proto_module("forecast_boot", "execution_boot")
-
-
-__all__ = ["weather_pb2", "trading_messages_pb2", "_load_proto_module"]
+__all__ = ["TopicConfigLoader"]
