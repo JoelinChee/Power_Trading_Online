@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from google.protobuf.json_format import MessageToDict
 
 from common.kafka import KafkaPublisher
-from common.proto_loader import weather_pb2
+from generated import weather_pb2
 from common.schemas import DataIngestionRequest
 
 

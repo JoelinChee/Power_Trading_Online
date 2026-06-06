@@ -7,7 +7,7 @@ from uuid import uuid4
 from google.protobuf.json_format import MessageToDict
 
 from common.kafka import Consumer, KafkaError, KafkaPublisher
-from common.proto_loader import trading_messages_pb2, weather_pb2
+from generated import trading_messages_pb2, weather_pb2
 from common.schemas import SeriesPoint
 
 
