@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from boots.data_boot.controllers.data_controller import root_router, router as data_router
 from boots.data_boot.controllers.health_controller import router as health_router
 from boots.data_boot.services.data_service import get_data_service
-from common.logging.logging import configure_logging
+from infrastructure.logging.logging import configure_logging
 
 
 # Configure process logging from centralized module.

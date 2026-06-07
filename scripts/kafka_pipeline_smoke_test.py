@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from common.loaders.topic_loader import TopicConfigLoader
+from infrastructure.loaders.topic_loader import TopicConfigLoader
 
 
 DATA_BOOT_URL = "http://127.0.0.1:8001"

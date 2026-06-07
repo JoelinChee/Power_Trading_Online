@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from common.loaders.loader_base import BaseConfigReader
+from infrastructure.loaders.loader_base import BaseConfigReader
 
 
 class TopicConfigLoader(BaseConfigReader):

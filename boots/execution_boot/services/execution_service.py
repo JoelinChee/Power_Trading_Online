@@ -3,13 +3,14 @@ from __future__ import annotations
 import logging
 from functools import lru_cache
 
+from boots.execution_boot.execution_loader import ExecutionAlgoConfigLoader
 from boots.execution_boot.services.algo import ExecutionAlgo
 from boots.execution_boot.services.messages import ExecutionInMessages, ExecutionOutMessages
-from common.loaders.boots_loader import BootsConfigLoader
-from common.loaders.kafka_loader import KafkaConfigLoader, KafkaRuntimeSettings
-from common.loaders.topic_loader import TopicConfigLoader
-from common.kafka import KafkaConsumerWorker
-from common.schemas import (
+from infrastructure.loaders.boots_loader import BootsConfigLoader
+from infrastructure.loaders.kafka_loader import KafkaConfigLoader, KafkaRuntimeSettings
+from infrastructure.loaders.topic_loader import TopicConfigLoader
+from infrastructure.kafka import KafkaConsumerWorker
+from infrastructure.schemas import (
     PipelineStatusResponse,
     RiskCheckRequest,
     RiskCheckResponse,
@@ -36,7 +37,11 @@ class ExecutionService:
 
         self.in_messages = ExecutionInMessages()
         self.out_messages = ExecutionOutMessages()
-        self.algo = ExecutionAlgo(service_name=self.service_name, logger=logger)
+        self.algo = ExecutionAlgo(
+            service_name=self.service_name,
+            logger=logger,
+            algo_config=ExecutionAlgoConfigLoader.get_algo_config(),
+        )
         self.forecast_consumer = KafkaConsumerWorker(
             settings=self.kafka_settings,
             topic_name=self.forecast_topic_name,

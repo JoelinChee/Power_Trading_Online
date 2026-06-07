@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from boots.forecast_boot.services.forecast_service import get_forecast_service
-from common.schemas import PipelineStatusResponse
+from infrastructure.schemas import PipelineStatusResponse
 
 
 router = APIRouter(prefix="/api/v1/forecast", tags=["forecast"])

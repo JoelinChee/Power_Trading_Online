@@ -1,0 +1,10 @@
+algo:
+  expected_cost_risk_weight: 45.0
+  renewable_coverage_risk_weight: 30.0
+  high_price_risk_weight: 35.0
+  renewable_coverage_threshold_ratio: 0.2
+  high_price_threshold: 520.0
+  approval_risk_threshold: 60.0
+  max_risk_score: 100.0
+  budget_limit_price_factor: 460.0
+  order_hours: 24

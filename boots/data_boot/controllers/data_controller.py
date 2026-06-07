@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from boots.data_boot.services.data_service import get_data_service
-from common.schemas import DataIngestionRequest, PipelineStatusResponse
+from infrastructure.schemas import DataIngestionRequest, PipelineStatusResponse
 
 
 root_router = APIRouter(tags=["data"])

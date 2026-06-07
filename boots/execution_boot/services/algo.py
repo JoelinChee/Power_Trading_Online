@@ -13,9 +13,21 @@ from generated import trading_messages_pb2
 class ExecutionAlgo:
     """Algorithm layer for risk evaluation and order generation."""
 
-    def __init__(self, service_name: str, logger: logging.Logger) -> None:
+    def __init__(self, service_name: str, logger: logging.Logger, algo_config: dict[str, object] | None = None) -> None:
         self.service_name = service_name
         self.logger = logger
+        self.algo_config = algo_config if isinstance(algo_config, dict) else {}
+
+        self.expected_cost_risk_weight = self.algo_config.get("expected_cost_risk_weight", 45.0)
+        self.renewable_coverage_risk_weight = self.algo_config.get("renewable_coverage_risk_weight", 30.0)
+        self.high_price_risk_weight = self.algo_config.get("high_price_risk_weight", 35.0)
+        self.renewable_coverage_threshold_ratio = self.algo_config.get("renewable_coverage_threshold_ratio", 0.2)
+        self.high_price_threshold = self.algo_config.get("high_price_threshold", 520.0)
+        self.approval_risk_threshold = self.algo_config.get("approval_risk_threshold", 60.0)
+        self.max_risk_score = self.algo_config.get("max_risk_score", 100.0)
+        self.budget_limit_price_factor = self.algo_config.get("budget_limit_price_factor", 460.0)
+        self.order_hours = self.algo_config.get("order_hours", 24.0)
+
         self.last_consumed_event: dict[str, object] | None = None
         self.last_processed_result: dict[str, object] | None = None
 
@@ -56,28 +68,28 @@ class ExecutionAlgo:
         expected_cost = predicted_load_mw * bid_price
         if expected_cost > budget_limit:
             reasons.append("Expected cost exceeds budget limit")
-            risk_score += 45.0
+            risk_score += self.expected_cost_risk_weight
 
-        if available_renewable_mw < predicted_load_mw * 0.2:
+        if available_renewable_mw < predicted_load_mw * self.renewable_coverage_threshold_ratio:
             reasons.append("Renewable coverage ratio is below 20%")
-            risk_score += 30.0
+            risk_score += self.renewable_coverage_risk_weight
 
-        if bid_price > 520:
+        if bid_price > self.high_price_threshold:
             reasons.append("Bid price exceeds internal price ceiling")
-            risk_score += 35.0
+            risk_score += self.high_price_risk_weight
 
-        approved = risk_score < 60.0
+        approved = risk_score < self.approval_risk_threshold
         return {
             "enterprise_id": enterprise_id,
             "approved": approved,
-            "risk_score": min(risk_score, 100.0),
+            "risk_score": min(risk_score, self.max_risk_score),
             "reasons": reasons or ["Risk within threshold"],
         }
 
     def create_trade_order(self, request: dict[str, Any]) -> dict[str, object]:
         """Create a mock day-ahead purchase order from a validated request."""
 
-        quantity = round(float(request["predicted_load_mw"]) * 24, 2)
+        quantity = round(float(request["predicted_load_mw"]) * self.order_hours, 2)
         return {
             "order_id": str(uuid4()),
             "enterprise_id": str(request["enterprise_id"]),
@@ -97,7 +109,7 @@ class ExecutionAlgo:
 
         predicted_load_mw = sum(point.value for point in event.load_points) / max(len(event.load_points), 1)
         predicted_price = sum(point.value for point in event.price_points) / max(len(event.price_points), 1)
-        budget_limit = predicted_load_mw * 460
+        budget_limit = predicted_load_mw * self.budget_limit_price_factor
 
         risk_request = {
             "enterprise_id": event.enterprise_id,

@@ -4,14 +4,15 @@ import logging
 from typing import Any
 from functools import lru_cache
 
+from boots.forecast_boot.forecast_loader import ForecastAlgoConfigLoader
 from boots.forecast_boot.services.algo import ForecastAlgo
 from boots.forecast_boot.services.messages import ForecastInMessages, ForecastOutMessages
-from common.loaders.boots_loader import BootsConfigLoader
-from common.loaders.kafka_loader import KafkaConfigLoader, KafkaRuntimeSettings
-from common.loaders.topic_loader import TopicConfigLoader
-from common.kafka import Consumer, KafkaError, KafkaPublisher
-from common.schemas import PipelineStatusResponse
-from common.timer import AsyncFixedRateScheduler
+from infrastructure.loaders.boots_loader import BootsConfigLoader
+from infrastructure.loaders.kafka_loader import KafkaConfigLoader, KafkaRuntimeSettings
+from infrastructure.loaders.topic_loader import TopicConfigLoader
+from infrastructure.kafka import Consumer, KafkaError, KafkaPublisher
+from infrastructure.schemas import PipelineStatusResponse
+from infrastructure.scheduler.timer import AsyncFixedRateScheduler
 
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ class ForecastService:
         self.algo = ForecastAlgo(
             service_name=self.service_name,
             timer_interval_seconds=self.timer_interval_seconds,
+            algo_config=ForecastAlgoConfigLoader.get_algo_config(),
             logger=logger,
         )
         self.update_scheduler = AsyncFixedRateScheduler(

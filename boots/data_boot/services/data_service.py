@@ -4,12 +4,13 @@ from functools import lru_cache
 
 from google.protobuf.json_format import MessageToDict
 
+from boots.data_boot.data_loader import DataAlgoConfigLoader
 from boots.data_boot.services.algo import DataAlgo
-from common.loaders.boots_loader import BootsConfigLoader
-from common.loaders.kafka_loader import KafkaConfigLoader, KafkaRuntimeSettings
-from common.loaders.topic_loader import TopicConfigLoader
-from common.kafka import KafkaPublisher
-from common.schemas import DataIngestionRequest, PipelineStatusResponse
+from infrastructure.loaders.boots_loader import BootsConfigLoader
+from infrastructure.loaders.kafka_loader import KafkaConfigLoader, KafkaRuntimeSettings
+from infrastructure.loaders.topic_loader import TopicConfigLoader
+from infrastructure.kafka import KafkaPublisher
+from infrastructure.schemas import DataIngestionRequest, PipelineStatusResponse
 from generated import weather_pb2
 
 
@@ -25,7 +26,10 @@ class DataService:
         )
         self.weather_topic_name = TopicConfigLoader.topic_name("data_boot", "forecast_boot")
         self.publisher = KafkaPublisher(self.kafka_settings)
-        self.algo = DataAlgo(service_name=self.boot_config["service_name"])
+        self.algo = DataAlgo(
+            service_name=self.boot_config["service_name"],
+            algo_config=DataAlgoConfigLoader.get_algo_config(),
+        )
         self.last_published_event: dict[str, object] | None = None
         self.last_feedback_event: dict[str, object] | None = None
 
