@@ -61,7 +61,7 @@ class ForecastAlgo:
 				a single payload or a batch queue payload.
 
 		Returns:
-			Typed output payload container with generated ForecastEvent(s).
+			Typed output payload container with generated ForecastEvent queue.
 
 		Raises:
 			ValueError: If the inbound payload batch is missing.
@@ -77,7 +77,6 @@ class ForecastAlgo:
 			generated_events.append(forecast_event)
 
 		return ForecastOutMessages(
-			forecast_boot_to_execution_boot=generated_events[-1],
 			forecast_boot_to_execution_boot_queue=generated_events,
 		)
 
@@ -86,8 +85,6 @@ class ForecastAlgo:
 
 		if in_messages.data_boot_to_forecast_boot_queue:
 			return [payload for payload in in_messages.data_boot_to_forecast_boot_queue if payload]
-		if in_messages.data_boot_to_forecast_boot:
-			return [in_messages.data_boot_to_forecast_boot]
 		return []
 
 	def _build_forecast_for_one_payload(self, payload: bytes) -> trading_messages_pb2.ForecastEvent:

@@ -149,8 +149,6 @@ class ForecastService:
         if not payloads:
             return 0
 
-        # Preserve single-message path while enabling explicit queue-based batch path.
-        self.in_messages.data_boot_to_forecast_boot = payloads[0] if len(payloads) == 1 else None
         self.in_messages.data_boot_to_forecast_boot_queue = payloads
         try:
             self.out_messages = self.algo.update(self.in_messages)
@@ -159,8 +157,6 @@ class ForecastService:
             return 0
 
         events = self.out_messages.forecast_boot_to_execution_boot_queue
-        if not events and self.out_messages.forecast_boot_to_execution_boot is not None:
-            events = [self.out_messages.forecast_boot_to_execution_boot]
 
         published = 0
         for forecast_event in events:

@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from google.protobuf.json_format import MessageToDict
 
+from boots.execution_boot.services.messages import ExecutionInMessages, ExecutionOutMessages
 from generated import trading_messages_pb2
 
 
@@ -17,6 +18,28 @@ class ExecutionAlgo:
         self.logger = logger
         self.last_consumed_event: dict[str, object] | None = None
         self.last_processed_result: dict[str, object] | None = None
+
+    def update(self, in_messages: ExecutionInMessages) -> ExecutionOutMessages:
+        """Consume one batch of forecast payloads and produce execution results."""
+
+        payloads = self._resolve_inbound_payloads(in_messages)
+        if not payloads:
+            raise ValueError("Missing inbound forecast payload batch")
+
+        generated_results: list[dict[str, object]] = []
+        for payload in payloads:
+            generated_results.append(self._process_one_forecast_payload(payload))
+
+        return ExecutionOutMessages(
+            execution_result_queue=generated_results,
+        )
+
+    def _resolve_inbound_payloads(self, in_messages: ExecutionInMessages) -> list[bytes]:
+        """Resolve inbound payload batch from the message contract object."""
+
+        if in_messages.forecast_boot_to_execution_boot_queue:
+            return [payload for payload in in_messages.forecast_boot_to_execution_boot_queue if payload]
+        return []
 
     def risk_check(self, request: dict[str, Any]) -> dict[str, object]:
         """Evaluate a basic rule-based risk decision."""
@@ -65,8 +88,8 @@ class ExecutionAlgo:
             "status": "CREATED",
         }
 
-    def handle_forecast_event(self, payload: bytes) -> None:
-        """Consume the configured forecast route and execute risk/order processing."""
+    def _process_one_forecast_payload(self, payload: bytes) -> dict[str, object]:
+        """Transform one forecast payload into one execution result."""
 
         event = trading_messages_pb2.ForecastEvent()
         event.ParseFromString(payload)
@@ -117,3 +140,4 @@ class ExecutionAlgo:
             event.event_id,
             bool(risk_response["approved"]),
         )
+        return result

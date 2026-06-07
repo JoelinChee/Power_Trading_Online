@@ -4,6 +4,7 @@ import logging
 from functools import lru_cache
 
 from boots.execution_boot.services.algo import ExecutionAlgo
+from boots.execution_boot.services.messages import ExecutionInMessages, ExecutionOutMessages
 from common.loaders.boots_loader import BootsConfigLoader
 from common.loaders.kafka_loader import KafkaConfigLoader, KafkaRuntimeSettings
 from common.loaders.topic_loader import TopicConfigLoader
@@ -25,19 +26,22 @@ class ExecutionService:
 
     def __init__(self) -> None:
         self.boot_config = BootsConfigLoader.get_boot("execution_boot")
+        self.service_name = self.boot_config["service_name"]
         self.kafka_config = KafkaConfigLoader.get_kafka()
         self.kafka_settings = KafkaRuntimeSettings(
-            service_name=self.boot_config["service_name"],
+            service_name=self.service_name,
             kafka_config=self.kafka_config,
         )
         self.forecast_topic_name = TopicConfigLoader.topic_name("forecast_boot", "execution_boot")
 
-        self.algo = ExecutionAlgo(service_name=self.boot_config["service_name"], logger=logger)
+        self.in_messages = ExecutionInMessages()
+        self.out_messages = ExecutionOutMessages()
+        self.algo = ExecutionAlgo(service_name=self.service_name, logger=logger)
         self.forecast_consumer = KafkaConsumerWorker(
             settings=self.kafka_settings,
             topic_name=self.forecast_topic_name,
             group_suffix="decision",
-            handler=self._handle_forecast_event,
+            handler=self._update,
         )
 
     def risk_check(self, request: RiskCheckRequest) -> RiskCheckResponse:
@@ -68,7 +72,7 @@ class ExecutionService:
         """Return latest consumed forecast event and processed execution result."""
 
         return PipelineStatusResponse(
-            service_name=self.boot_config["service_name"],
+            service_name=self.service_name,
             last_consumed_event_id=(self.algo.last_consumed_event or {}).get("event_id"),
             last_published_event_id=(self.algo.last_processed_result or {}).get("event_id"),
             details={
@@ -77,9 +81,14 @@ class ExecutionService:
             },
         )
 
-    def _handle_forecast_event(self, payload: bytes) -> None:
+    def _update(self, payload: bytes) -> None:
         """Consume forecast payload and execute risk/order processing."""
-        self.algo.handle_forecast_event(payload)
+
+        self.in_messages.forecast_boot_to_execution_boot_queue = [payload]
+        try:
+            self.out_messages = self.algo.update(self.in_messages)
+        except Exception as exc:
+            logger.exception("Failed to transform forecast payload into execution result: %s", exc)
 
 
 @lru_cache(maxsize=1)

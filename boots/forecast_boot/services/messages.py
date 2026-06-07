@@ -13,7 +13,6 @@ class ForecastInMessages:
     easy to evolve without leaking Kafka details into the algorithm layer.
     """
 
-    data_boot_to_forecast_boot: bytes | None = None
     data_boot_to_forecast_boot_queue: list[bytes] = field(default_factory=list)
 
 
@@ -25,5 +24,4 @@ class ForecastOutMessages:
     contract object between orchestration and algorithm components.
     """
 
-    forecast_boot_to_execution_boot: trading_messages_pb2.ForecastEvent | None = None
     forecast_boot_to_execution_boot_queue: list[trading_messages_pb2.ForecastEvent] = field(default_factory=list)
