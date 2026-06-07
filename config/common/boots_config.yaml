@@ -1,0 +1,22 @@
+boots:
+  data_boot:
+    service_name: data_boot
+    host: 0.0.0.0
+    port: 8001
+    trigger:
+      type: event
+      topic: web
+  forecast_boot:
+    service_name: forecast_boot
+    host: 0.0.0.0
+    port: 8002
+    trigger:
+      type: timer
+      timer_interval_seconds: 5.0
+  execution_boot:
+    service_name: execution_boot
+    host: 0.0.0.0
+    port: 8003
+    trigger:
+      type: event
+      topic: forecast_boot_to_execution_boot

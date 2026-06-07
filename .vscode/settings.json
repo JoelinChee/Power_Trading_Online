@@ -1,0 +1,8 @@
+{
+    "terminal.integrated.env.linux": {
+        "PYTHONPYCACHEPREFIX": "${workspaceFolder}/generated/pycache"
+    },
+    "python-envs.defaultEnvManager": "ms-python.python:conda",
+    "python-envs.defaultPackageManager": "ms-python.python:conda",
+    "kafka.clusters.selected": "PowerTradingOnline-bG9jYWxob3N0OjkwOTI"
+}

@@ -1,0 +1,1 @@
+"""Shared modules for the power trading platform."""

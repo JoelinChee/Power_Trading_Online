@@ -1,0 +1,15 @@
+algo:
+  slots_per_day: 96
+  default_weather_type: unknown
+  default_enterprise_id: default-enterprise
+  default_base_temperature_celsius: 28.0
+  default_base_wind_speed_mps: 4.0
+  base_load_mw: 60.0
+  base_price_yuan_mwh: 420.0
+  load_temp_threshold_celsius: 20.0
+  load_temp_factor: 1.2
+  price_temp_threshold_celsius: 24.0
+  price_temp_factor: 2.8
+  renewable_wind_factor: 2.2
+  renewable_solar_divisor: 40.0
+  renewable_fallback_mw: 8.0

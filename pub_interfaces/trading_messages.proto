@@ -1,0 +1,137 @@
+// Shared protobuf contracts for the end-to-end power trading event pipeline.
+//
+// The messages below define the Kafka payloads exchanged among data_boot,
+// forecast_boot, and execution_boot. Every field is kept explicit so service
+// boundaries remain stable even when the internal Python implementation changes.
+
+syntax = "proto3";
+
+package power_trading;
+
+// Current weather observation captured by the data boot service.
+message WeatherSnapshot {
+  // Ambient temperature in degrees Celsius.
+  double temperature_celsius = 1;
+  // Relative humidity percentage on a 0-100 scale.
+  double humidity_ratio = 2;
+  // Wind speed in meters per second.
+  double wind_speed_mps = 3;
+  // Human-readable weather category, for example cloudy or sunny.
+  string weather_type = 4;
+}
+
+// Current enterprise load observation captured by the data boot service.
+message LoadSnapshot {
+  // Observation timestamp encoded as an ISO 8601 string.
+  string timestamp = 1;
+  // Instantaneous load in megawatts.
+  double load_mw = 2;
+}
+
+// Current market price observation captured by the data boot service.
+message PriceSnapshot {
+  // Observation timestamp encoded as an ISO 8601 string.
+  string timestamp = 1;
+  // Observed market price value.
+  double spot_price = 2;
+  // Market segment, for example day_ahead or real_time.
+  string market = 3;
+}
+
+// Current renewable generation observation captured by the data boot service.
+message RenewableSnapshot {
+  // Observation timestamp encoded as an ISO 8601 string.
+  string timestamp = 1;
+  // Wind generation output in megawatts.
+  double wind_output_mw = 2;
+  // Solar generation output in megawatts.
+  double solar_output_mw = 3;
+}
+
+// Single forecast point in the 96-slot daily forecast horizon.
+message ForecastPoint {
+  // Quarter-hour slot number, from 1 to 96.
+  int32 slot = 1;
+  // Forecasted numeric value for the slot.
+  double value = 2;
+}
+
+// Event published by data_boot after ingesting a composite snapshot.
+message DataIngestionEvent {
+  // Unique identifier assigned to this event.
+  string event_id = 1;
+  // Name of the service that emitted the event.
+  string source_service = 2;
+  // Publication timestamp copied from the load observation timestamp.
+  string published_at = 3;
+  // Enterprise identifier used to correlate all downstream events.
+  string enterprise_id = 4;
+  // Target trading date extracted from the input timestamp.
+  string target_date = 5;
+  // Embedded weather observation.
+  WeatherSnapshot weather = 6;
+  // Embedded load observation.
+  LoadSnapshot load = 7;
+  // Embedded price observation.
+  PriceSnapshot price = 8;
+  // Embedded renewable generation observation.
+  RenewableSnapshot renewable = 9;
+}
+
+// Event published by forecast_boot after it consumes a data ingestion event.
+message ForecastEvent {
+  // Unique identifier assigned to this forecast event.
+  string event_id = 1;
+  // Name of the service that emitted the event.
+  string source_service = 2;
+  // Upstream data ingestion event identifier that triggered this forecast.
+  string upstream_event_id = 3;
+  // Publication timestamp inherited from the upstream data event.
+  string published_at = 4;
+  // Enterprise identifier used to correlate all downstream events.
+  string enterprise_id = 5;
+  // Target trading date associated with the forecast horizon.
+  string target_date = 6;
+  // Weather category used to contextualize the forecast.
+  string weather_type = 7;
+  // Total renewable capacity available to the execution engine.
+  double available_renewable_mw = 8;
+  // 96-point weather forecast series.
+  repeated ForecastPoint weather_points = 9;
+  // 96-point load forecast series.
+  repeated ForecastPoint load_points = 10;
+  // 96-point price forecast series.
+  repeated ForecastPoint price_points = 11;
+}
+
+// Event published by execution_boot after it evaluates risk and order creation.
+message ExecutionEvent {
+  // Unique identifier assigned to this execution event.
+  string event_id = 1;
+  // Name of the service that emitted the event.
+  string source_service = 2;
+  // Upstream forecast event identifier that triggered this decision.
+  string upstream_event_id = 3;
+  // Publication timestamp inherited from the upstream forecast event.
+  string published_at = 4;
+  // Enterprise identifier used to correlate all downstream events.
+  string enterprise_id = 5;
+  // Target trading date associated with the decision.
+  string target_date = 6;
+  // Final approval flag produced by the rule-based risk engine.
+  bool approved = 7;
+  // Numeric risk score on a 0-100 scale.
+  double risk_score = 8;
+  // Human-readable decision reasons collected during rule evaluation.
+  repeated string reasons = 9;
+  // Generated trade-order identifier when approval succeeds.
+  string order_id = 10;
+  // Synthetic order type label.
+  string order_type = 11;
+  // Generated order quantity in megawatt-hours.
+  double quantity_mwh = 12;
+  // Generated order limit price.
+  double limit_price = 13;
+  // Final execution status, such as CREATED or REJECTED.
+  string status = 14;
+}

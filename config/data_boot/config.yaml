@@ -1,0 +1,15 @@
+algo:
+  region_code: CN-SH
+  region_name: Shanghai
+  base_temperature_celsius: 29.5
+  base_humidity_percent: 74.0
+  base_pressure_hpa: 1008.0
+  day_visibility_km: 8.5
+  night_visibility_km: 6.2
+  day_cloud_cover_percent: 38.0
+  night_cloud_cover_percent: 68.0
+  rain_start_hour: 14
+  rain_end_hour: 17
+  rain_amount_mm: 1.6
+  rain_probability_percent: 62.0
+  dry_probability_percent: 12.0
