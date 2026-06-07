@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 from uuid import uuid4
 
 from google.protobuf.json_format import MessageToDict
 
-from common.kafka import Consumer, KafkaError, KafkaPublisher
 from generated import trading_messages_pb2, weather_pb2
 from common.schemas import SeriesPoint
 
@@ -18,151 +16,18 @@ class ForecastAlgo:
 		self,
 		service_name: str,
 		timer_interval_seconds: float,
-		kafka_enabled: bool,
-		kafka_bootstrap_servers: str,
-		kafka_client_id: str,
-		kafka_auto_offset_reset: str,
-		weather_consumer_group: str,
-		weather_topic_name: str,
-		forecast_topic_name: str,
-		publisher: KafkaPublisher,
 		logger: logging.Logger,
 	) -> None:
 		self.service_name = service_name
 		self.timer_interval_seconds = timer_interval_seconds
-		self.kafka_enabled = kafka_enabled
-		self.kafka_bootstrap_servers = kafka_bootstrap_servers
-		self.kafka_client_id = kafka_client_id
-		self.kafka_auto_offset_reset = kafka_auto_offset_reset
-		self.weather_consumer_group = weather_consumer_group
-		self.publisher = publisher
 		self.logger = logger
-		self.weather_topic = weather_topic_name
-		self.forecast_topic = forecast_topic_name
-		self.weather_consumer: Consumer | None = None
 
 		self.last_received_event: dict[str, object] | None = None
 		self.last_received_weather_event: dict[str, object] | None = None
 		self.last_published_event: dict[str, object] | None = None
 
-	def stop(self) -> None:
-		"""Close Kafka consumer resources owned by the algorithm layer."""
-
-		if self.weather_consumer is not None:
-			self.weather_consumer.close()
-			self.weather_consumer = None
-
-	def drain_weather_events(self) -> None:
-		"""Pull all currently available weather messages on each fixed-rate cycle."""
-
-		consumer = self._get_or_create_weather_consumer()
-		self.logger.warning(
-			"forecast_boot fixed-rate tick service=%s interval_seconds=%s",
-			self.service_name,
-			self.timer_interval_seconds,
-		)
-		if consumer is None:
-			self.logger.warning("Consumer is not available.")
-			return
-
-		processed_messages = 0
-		while True:
-			message = consumer.poll(0.1)
-			if message is None:
-				self.logger.warning(
-					"message is None for service=%s topic=%s interval_seconds=%s",
-					self.service_name,
-					self.weather_topic,
-					self.timer_interval_seconds,
-				)
-				break
-			if message.error():
-				if self._is_partition_eof(message.error()):
-					break
-				if self._is_unknown_topic(message.error()):
-					self.logger.info(
-						"Kafka topic=%s is not available yet for service=%s; waiting for topic auto-creation",
-						self.weather_topic,
-						self.service_name,
-					)
-					break
-				self.logger.warning(
-					"Kafka poll returned error service=%s topic=%s error=%s",
-					self.service_name,
-					self.weather_topic,
-					message.error(),
-				)
-				break
-
-			payload = message.value()
-			self.logger.warning(
-				"message is available for service=%s topic=%s interval_seconds=%s",
-				self.service_name,
-				self.weather_topic,
-				self.timer_interval_seconds,
-			)
-			if not payload:
-				continue
-
-			processed_messages += 1
-			self._handle_weather_event(payload)
-
-		if processed_messages:
-			self.logger.warning(
-				"forecast_boot fixed-rate cycle processed_messages=%s interval_seconds=%s",
-				processed_messages,
-				self.timer_interval_seconds,
-			)
-		else:
-			self.logger.warning(
-				"forecast_boot fixed-rate cycle idle topic=%s interval_seconds=%s",
-				self.weather_topic,
-				self.timer_interval_seconds,
-			)
-
-	def _get_or_create_weather_consumer(self) -> Consumer | None:
-		"""Lazily create one Kafka consumer reused by the fixed-rate scheduler."""
-
-		if not self.kafka_enabled:
-			self.logger.info("Kafka consumer disabled for service=%s", self.service_name)
-			return None
-
-		if Consumer is None:
-			self.logger.warning("confluent-kafka is not installed; consumer will not start")
-			return None
-
-		if self.weather_consumer is not None:
-			return self.weather_consumer
-
-		self.weather_consumer = Consumer(
-			{
-				"bootstrap.servers": self.kafka_bootstrap_servers,
-				"group.id": self.weather_consumer_group,
-				"client.id": f"{self.kafka_client_id}-{self.service_name}",
-				"auto.offset.reset": self.kafka_auto_offset_reset,
-			}
-		)
-		self.weather_consumer.subscribe([self.weather_topic])
-		self.logger.warning(
-			"forecast_boot AsyncIOScheduler fixed-rate consumer subscribed group=%s topic=%s interval_seconds=%s",
-			self.weather_consumer_group,
-			self.weather_topic,
-			self.timer_interval_seconds,
-		)
-		return self.weather_consumer
-
-	def _is_partition_eof(self, error: Any) -> bool:
-		"""Return whether the Kafka error means the current partition is drained."""
-
-		return KafkaError is not None and error.code() == KafkaError._PARTITION_EOF
-
-	def _is_unknown_topic(self, error: Any) -> bool:
-		"""Return whether the Kafka error means the topic does not exist yet."""
-
-		return KafkaError is not None and error.code() == KafkaError.UNKNOWN_TOPIC_OR_PART
-
-	def _handle_weather_event(self, payload: bytes) -> None:
-		"""Consume the configured weather route and publish one ForecastEvent."""
+	def handle_weather_event(self, payload: bytes) -> trading_messages_pb2.ForecastEvent:
+		"""Consume one weather payload and build the next ForecastEvent."""
 
 		dataset = weather_pb2.HourlyWeatherDataset()
 		dataset.ParseFromString(payload)
@@ -182,9 +47,8 @@ class ForecastAlgo:
 		}
 
 		forecast_event = self._build_forecast_event(dataset=dataset, upstream_event_id=upstream_event_id)
-		self.publisher.publish_proto(self.forecast_topic, forecast_event, key=forecast_event.enterprise_id)
 		self.last_published_event = MessageToDict(forecast_event, preserving_proto_field_name=True)
-		self.logger.warning("forecast_boot published forecast event_id=%s", forecast_event.event_id)
+		return forecast_event
 
 	def _build_forecast_event(
 		self, dataset: weather_pb2.HourlyWeatherDataset, upstream_event_id: str

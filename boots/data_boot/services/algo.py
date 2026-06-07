@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 
 from google.protobuf.json_format import MessageToDict
 
-from common.kafka import KafkaPublisher
 from generated import weather_pb2
 from common.schemas import DataIngestionRequest
 
@@ -12,10 +11,8 @@ from common.schemas import DataIngestionRequest
 class DataAlgo:
     """Algorithm layer for data shaping and weather event publication."""
 
-    def __init__(self, service_name: str, weather_topic_name: str, publisher: KafkaPublisher) -> None:
+    def __init__(self, service_name: str) -> None:
         self.service_name = service_name
-        self.weather_topic_name = weather_topic_name
-        self.publisher = publisher
         self.last_published_event: dict[str, object] | None = None
         self.last_feedback_event: dict[str, object] | None = None
 
@@ -46,16 +43,23 @@ class DataAlgo:
             },
         }
 
-    def publish_browser_weather(self) -> dict[str, object]:
-        """Build one sample hourly weather dataset and publish it to Kafka."""
+    def build_browser_weather_dataset(self) -> weather_pb2.HourlyWeatherDataset:
+        """Build one sample hourly weather dataset for service-layer publication."""
 
-        dataset = self._build_hourly_weather_dataset()
-        self.publisher.publish_proto(self.weather_topic_name, dataset, key=dataset.daily_weather[0].region_code)
+        return self._build_hourly_weather_dataset()
+
+    def record_browser_weather_publication(
+        self,
+        dataset: weather_pb2.HourlyWeatherDataset,
+        weather_topic_name: str,
+    ) -> dict[str, object]:
+        """Record the result of one browser-triggered weather publication."""
+
         self.last_published_event = MessageToDict(dataset, preserving_proto_field_name=True)
         self.last_feedback_event = {
             "accepted": True,
             "message": "Kafka发送成功",
-            "topic": self.weather_topic_name,
+            "topic": weather_topic_name,
             "generated_at": dataset.generated_at,
             "target_service": "forecast_boot",
         }

@@ -22,11 +22,7 @@ class DataService:
         )
         self.weather_topic_name = TopicConfigLoader.topic_name("data_boot", "forecast_boot")
         self.publisher = KafkaPublisher(self.kafka_settings)
-        self.algo = DataAlgo(
-            service_name=self.boot_config["service_name"],
-            weather_topic_name=self.weather_topic_name,
-            publisher=self.publisher,
-        )
+        self.algo = DataAlgo(service_name=self.boot_config["service_name"])
 
     def get_current_snapshot(self) -> dict[str, object]:
         """Return a mock real-time snapshot for manual API inspection."""
@@ -38,8 +34,9 @@ class DataService:
         Returns:
             Browser-facing acknowledgement that the weather dataset was sent.
         """
-
-        return self.algo.publish_browser_weather()
+        dataset = self.algo.build_browser_weather_dataset()
+        self.publisher.publish_proto(self.weather_topic_name, dataset, key=dataset.daily_weather[0].region_code)
+        return self.algo.record_browser_weather_publication(dataset, self.weather_topic_name)
 
     def ingest(self, request: DataIngestionRequest) -> dict[str, object]:
         """Accept an ingestion request without publishing to Kafka topics.
