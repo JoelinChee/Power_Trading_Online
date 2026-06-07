@@ -6,9 +6,10 @@ logic while encapsulating the repetitive producer and background consumer setup.
 
 from __future__ import annotations
 
-import logging
 import threading
 from typing import Any, Callable, Optional, Protocol
+
+from infrastructure.logging.logging import get_logger
 
 try:
     from confluent_kafka import Consumer, KafkaError, Producer
@@ -29,7 +30,7 @@ class KafkaSettingsProtocol(Protocol):
         ...
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class KafkaPublisher:

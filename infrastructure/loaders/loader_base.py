@@ -10,10 +10,11 @@ from ast import literal_eval
 from pathlib import Path
 from typing import Any, Optional, Union
 import json
-import logging
+
+from infrastructure.logging.logging import get_logger
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class BaseConfigReader:

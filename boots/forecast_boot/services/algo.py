@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import logging
 from uuid import uuid4
 
 from google.protobuf.json_format import MessageToDict
@@ -35,36 +34,17 @@ class ForecastAlgo:
 	- Maintains lightweight snapshots for observability endpoints.
 	"""
 
-	SLOTS_PER_DAY = 96
-	DEFAULT_WEATHER_TYPE = "unknown"
-	DEFAULT_ENTERPRISE_ID = "default-enterprise"
-
 	def __init__(
 		self,
 		service_name: str,
 		timer_interval_seconds: float,
 		algo_config: dict[str, object] | None,
-		logger: logging.Logger,
+		logger: object,
 	) -> None:
 		self.service_name = service_name
 		self.timer_interval_seconds = timer_interval_seconds
 		self.logger = logger
 		self.algo_config = algo_config if isinstance(algo_config, dict) else {}
-
-		self.slots_per_day = self.algo_config.get("slots_per_day", self.SLOTS_PER_DAY)
-		self.default_weather_type = self.algo_config.get("default_weather_type", self.DEFAULT_WEATHER_TYPE)
-		self.default_enterprise_id = self.algo_config.get("default_enterprise_id", self.DEFAULT_ENTERPRISE_ID)
-		self.default_base_temperature_celsius = self.algo_config.get("default_base_temperature_celsius", 28.0)
-		self.default_base_wind_speed_mps = self.algo_config.get("default_base_wind_speed_mps", 4.0)
-		self.base_load_mw = self.algo_config.get("base_load_mw", 60.0)
-		self.base_price_yuan_mwh = self.algo_config.get("base_price_yuan_mwh", 420.0)
-		self.load_temp_threshold_celsius = self.algo_config.get("load_temp_threshold_celsius", 20.0)
-		self.load_temp_factor = self.algo_config.get("load_temp_factor", 1.2)
-		self.price_temp_threshold_celsius = self.algo_config.get("price_temp_threshold_celsius", 24.0)
-		self.price_temp_factor = self.algo_config.get("price_temp_factor", 2.8)
-		self.renewable_wind_factor = self.algo_config.get("renewable_wind_factor", 2.2)
-		self.renewable_solar_divisor = self.algo_config.get("renewable_solar_divisor", 40.0)
-		self.renewable_fallback_mw = self.algo_config.get("renewable_fallback_mw", 8.0)
 
 		self.last_received_event: dict[str, object] | None = None
 		self.last_received_weather_event: dict[str, object] | None = None
@@ -190,22 +170,37 @@ class ForecastAlgo:
 		daily = dataset.daily_weather[0] if dataset.daily_weather else None
 		hourly = list(daily.hourly_weather) if daily and daily.hourly_weather else []
 
-		weather_type = hourly[0].condition_text if hourly else self.default_weather_type
+		default_weather_type = str(self.algo_config["default_weather_type"])
+		default_enterprise_id = str(self.algo_config["default_enterprise_id"])
+		default_base_temperature_celsius = float(self.algo_config["default_base_temperature_celsius"])
+		default_base_wind_speed_mps = float(self.algo_config["default_base_wind_speed_mps"])
+		base_load_mw = float(self.algo_config["base_load_mw"])
+		base_price_yuan_mwh = float(self.algo_config["base_price_yuan_mwh"])
+		load_temp_threshold_celsius = float(self.algo_config["load_temp_threshold_celsius"])
+		load_temp_factor = float(self.algo_config["load_temp_factor"])
+		price_temp_threshold_celsius = float(self.algo_config["price_temp_threshold_celsius"])
+		price_temp_factor = float(self.algo_config["price_temp_factor"])
+		renewable_wind_factor = float(self.algo_config["renewable_wind_factor"])
+		renewable_solar_divisor = float(self.algo_config["renewable_solar_divisor"])
+		renewable_fallback_mw = float(self.algo_config["renewable_fallback_mw"])
+		slots_per_day = int(self.algo_config["slots_per_day"])
+
+		weather_type = hourly[0].condition_text if hourly else default_weather_type
 		target_date = daily.target_date if daily else (dataset.generated_at[:10] if dataset.generated_at else "")
-		enterprise_id = daily.region_code if daily else self.default_enterprise_id
+		enterprise_id = daily.region_code if daily else default_enterprise_id
 		published_at = dataset.generated_at
 		upstream_event_id = str(uuid4())
 
-		base_temp = hourly[0].temperature_celsius if hourly else self.default_base_temperature_celsius
-		base_wind = hourly[0].wind.speed_mps if hourly else self.default_base_wind_speed_mps
-		base_load = self.base_load_mw + max(base_temp - self.load_temp_threshold_celsius, 0.0) * self.load_temp_factor
-		base_price = self.base_price_yuan_mwh + max(base_temp - self.price_temp_threshold_celsius, 0.0) * self.price_temp_factor
+		base_temp = hourly[0].temperature_celsius if hourly else default_base_temperature_celsius
+		base_wind = hourly[0].wind.speed_mps if hourly else default_base_wind_speed_mps
+		base_load = base_load_mw + max(base_temp - load_temp_threshold_celsius, 0.0) * load_temp_factor
+		base_price = base_price_yuan_mwh + max(base_temp - price_temp_threshold_celsius, 0.0) * price_temp_factor
 		renewable_mw = round(
-			(base_wind * self.renewable_wind_factor)
+			(base_wind * renewable_wind_factor)
 			+ (
-				hourly[0].solar_irradiance_wm2 / self.renewable_solar_divisor
+				hourly[0].solar_irradiance_wm2 / renewable_solar_divisor
 				if hourly
-				else self.renewable_fallback_mw
+				else renewable_fallback_mw
 			),
 			2,
 		)
@@ -214,7 +209,7 @@ class ForecastAlgo:
 		load_points: list[ForecastPoint] = []
 		price_points: list[ForecastPoint] = []
 
-		for slot in range(1, self.slots_per_day + 1):
+		for slot in range(1, slots_per_day + 1):
 			source_hour = hourly[(slot - 1) % len(hourly)] if hourly else None
 			weather_seed = source_hour.temperature_celsius if source_hour else base_temp
 

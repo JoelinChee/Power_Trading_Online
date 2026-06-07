@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from functools import lru_cache
 
 from boots.execution_boot.execution_loader import ExecutionAlgoConfigLoader
@@ -10,6 +9,7 @@ from infrastructure.loaders.boots_loader import BootsConfigLoader
 from infrastructure.loaders.kafka_loader import KafkaConfigLoader, KafkaRuntimeSettings
 from infrastructure.loaders.topic_loader import TopicConfigLoader
 from infrastructure.kafka import KafkaConsumerWorker
+from infrastructure.logging.logging import get_logger
 from infrastructure.schemas import (
     PipelineStatusResponse,
     RiskCheckRequest,
@@ -19,7 +19,7 @@ from infrastructure.schemas import (
 )
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ExecutionService:

@@ -25,3 +25,9 @@ def configure_logging(level: int | str | None = None, *, force: bool = True) -> 
 		force=force,
 	)
 
+
+def get_logger(name: str) -> logging.Logger:
+	"""Create or retrieve a namespaced logger from the configured root."""
+
+	return logging.getLogger(name)
+

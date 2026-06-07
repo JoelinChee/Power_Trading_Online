@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from typing import Any
 from functools import lru_cache
 
@@ -11,11 +10,12 @@ from infrastructure.loaders.boots_loader import BootsConfigLoader
 from infrastructure.loaders.kafka_loader import KafkaConfigLoader, KafkaRuntimeSettings
 from infrastructure.loaders.topic_loader import TopicConfigLoader
 from infrastructure.kafka import Consumer, KafkaError, KafkaPublisher
+from infrastructure.logging.logging import get_logger
 from infrastructure.schemas import PipelineStatusResponse
 from infrastructure.scheduler.timer import AsyncFixedRateScheduler
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class ForecastService:
     """Application service orchestrating forecast pipeline lifecycle.

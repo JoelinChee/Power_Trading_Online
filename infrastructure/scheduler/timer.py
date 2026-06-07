@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import logging
 import threading
 from collections.abc import Callable
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from infrastructure.logging.logging import get_logger
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class AsyncFixedRateScheduler:
     """Run a callback with AsyncIOScheduler on a fixed-rate interval."""

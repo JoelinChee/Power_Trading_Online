@@ -13,21 +13,6 @@ class DataAlgo:
         self.service_name = service_name
         self.algo_config = algo_config if isinstance(algo_config, dict) else {}
 
-        self.region_code = self.algo_config.get("region_code", "CN-SH")
-        self.region_name = self.algo_config.get("region_name", "Shanghai")
-        self.base_temperature_celsius = self.algo_config.get("base_temperature_celsius", 29.5)
-        self.base_humidity_percent = self.algo_config.get("base_humidity_percent", 74.0)
-        self.base_pressure_hpa = self.algo_config.get("base_pressure_hpa", 1008.0)
-        self.day_visibility_km = self.algo_config.get("day_visibility_km", 8.5)
-        self.night_visibility_km = self.algo_config.get("night_visibility_km", 6.2)
-        self.day_cloud_cover_percent = self.algo_config.get("day_cloud_cover_percent", 38.0)
-        self.night_cloud_cover_percent = self.algo_config.get("night_cloud_cover_percent", 68.0)
-        self.rain_start_hour = self.algo_config.get("rain_start_hour", 14)
-        self.rain_end_hour = self.algo_config.get("rain_end_hour", 17)
-        self.rain_amount_mm = self.algo_config.get("rain_amount_mm", 1.6)
-        self.rain_probability_percent = self.algo_config.get("rain_probability_percent", 62.0)
-        self.dry_probability_percent = self.algo_config.get("dry_probability_percent", 12.0)
-
         self.last_published_event: dict[str, object] | None = None
         self.last_feedback_event: dict[str, object] | None = None
 
@@ -75,12 +60,21 @@ class DataAlgo:
 
         daily_weather = dataset.daily_weather.add()
         daily_weather.target_date = base_time.date().isoformat()
-        daily_weather.region_code = self.region_code
-        daily_weather.region_name = self.region_name
+        daily_weather.region_code = str(self.algo_config["region_code"])
+        daily_weather.region_name = str(self.algo_config["region_name"])
 
-        base_temperature = self.base_temperature_celsius
-        base_humidity = self.base_humidity_percent
-        base_pressure = self.base_pressure_hpa
+        base_temperature = float(self.algo_config["base_temperature_celsius"])
+        base_humidity = float(self.algo_config["base_humidity_percent"])
+        base_pressure = float(self.algo_config["base_pressure_hpa"])
+        day_visibility_km = float(self.algo_config["day_visibility_km"])
+        night_visibility_km = float(self.algo_config["night_visibility_km"])
+        day_cloud_cover_percent = float(self.algo_config["day_cloud_cover_percent"])
+        night_cloud_cover_percent = float(self.algo_config["night_cloud_cover_percent"])
+        rain_start_hour = int(self.algo_config["rain_start_hour"])
+        rain_end_hour = int(self.algo_config["rain_end_hour"])
+        rain_amount_mm = float(self.algo_config["rain_amount_mm"])
+        rain_probability_percent = float(self.algo_config["rain_probability_percent"])
+        dry_probability_percent = float(self.algo_config["dry_probability_percent"])
 
         for hour in range(24):
             hourly = daily_weather.hourly_weather.add()
@@ -98,8 +92,8 @@ class DataAlgo:
             hourly.humidity_percent = round(base_humidity + ((hour % 6) - 3) * 2.5, 2)
             hourly.dew_point_celsius = round(hourly.temperature_celsius - 4.2, 2)
             hourly.pressure_hpa = round(base_pressure + ((hour % 5) - 2) * 1.3, 2)
-            hourly.visibility_km = self.day_visibility_km if 5 <= timestamp.hour <= 21 else self.night_visibility_km
-            hourly.cloud_cover_percent = self.day_cloud_cover_percent if 6 <= timestamp.hour <= 18 else self.night_cloud_cover_percent
+            hourly.visibility_km = day_visibility_km if 5 <= timestamp.hour <= 21 else night_visibility_km
+            hourly.cloud_cover_percent = day_cloud_cover_percent if 6 <= timestamp.hour <= 18 else night_cloud_cover_percent
             hourly.solar_irradiance_wm2 = max(0.0, round((12 - abs(timestamp.hour - 12)) * 62.5, 2))
             hourly.uv_index = max(0.0, round((12 - abs(timestamp.hour - 12)) * 0.6, 2))
 
@@ -109,10 +103,10 @@ class DataAlgo:
             hourly.wind.direction_text = self._wind_direction_text(hourly.wind.direction_degrees)
             hourly.wind.level = weather_pb2.WIND_LEVEL_GENTLE_BREEZE if hourly.wind.speed_mps < 6.0 else weather_pb2.WIND_LEVEL_MODERATE_BREEZE
 
-            is_rain_window = self.rain_start_hour <= timestamp.hour <= self.rain_end_hour
+            is_rain_window = rain_start_hour <= timestamp.hour <= rain_end_hour
             hourly.precipitation.type = weather_pb2.PRECIPITATION_TYPE_RAIN if is_rain_window else weather_pb2.PRECIPITATION_TYPE_NONE
-            hourly.precipitation.amount_mm = self.rain_amount_mm if is_rain_window else 0.0
-            hourly.precipitation.probability_percent = self.rain_probability_percent if is_rain_window else self.dry_probability_percent
+            hourly.precipitation.amount_mm = rain_amount_mm if is_rain_window else 0.0
+            hourly.precipitation.probability_percent = rain_probability_percent if is_rain_window else dry_probability_percent
             hourly.precipitation.snow_depth_cm = 0.0
 
         return dataset
