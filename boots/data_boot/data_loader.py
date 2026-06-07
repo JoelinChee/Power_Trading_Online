@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 from typing import Any
 
 from boots.common.loader_base import BaseConfigReader
@@ -12,8 +13,15 @@ class DataAlgoConfigLoader(BaseConfigReader):
 	_default_config_path = Path(__file__).resolve().parents[2] / "config" / "data_boot" / "config.yaml"
 
 	@classmethod
+	def _config_path(cls) -> Path:
+		runtime_root = os.getenv("POWER_TRADING_HOME")
+		if runtime_root:
+			return Path(runtime_root).resolve() / "config" / "data_boot" / "config.yaml"
+		return cls._default_config_path
+
+	@classmethod
 	def get_algo_config(cls) -> dict[str, Any]:
-		loaded = cls.load_config_dict(cls._default_config_path)
+		loaded = cls.load_config_dict(cls._config_path())
 		algo_config = loaded.get("algo") if isinstance(loaded.get("algo"), dict) else {}
 		return {
 			"region_code": str(algo_config.get("region_code", "CN-SH")),

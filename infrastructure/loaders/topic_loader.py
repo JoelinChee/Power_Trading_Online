@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 from typing import Any
 
 from infrastructure.loaders.loader_base import BaseConfigReader
@@ -12,8 +13,15 @@ class TopicConfigLoader(BaseConfigReader):
     _default_config_path = Path(__file__).resolve().parents[2] / "config" / "common" / "topic_config.yaml"
 
     @classmethod
+    def _config_path(cls) -> Path:
+        runtime_root = os.getenv("POWER_TRADING_HOME")
+        if runtime_root:
+            return Path(runtime_root).resolve() / "config" / "common" / "topic_config.yaml"
+        return cls._default_config_path
+
+    @classmethod
     def _load_routes(cls) -> dict[str, Any]:
-        loaded = cls.load_config_dict(cls._default_config_path)
+        loaded = cls.load_config_dict(cls._config_path())
         routes = loaded.get("topic", {}) if isinstance(loaded.get("topic", {}), dict) else {}
         return routes
 
