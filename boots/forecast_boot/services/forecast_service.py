@@ -5,6 +5,7 @@ from typing import Any
 from functools import lru_cache
 
 from boots.forecast_boot.services.algo import ForecastAlgo
+from boots.forecast_boot.services.messages import ForecastInMessages, ForecastOutMessages
 from common.loaders.boots_loader import BootsConfigLoader
 from common.loaders.kafka_loader import KafkaConfigLoader, KafkaRuntimeSettings
 from common.loaders.topic_loader import TopicConfigLoader
@@ -15,41 +16,52 @@ from common.timer import AsyncFixedRateScheduler
 
 logger = logging.getLogger(__name__)
 
-
 class ForecastService:
-    """Service layer for weather-topic consumption and forecast-topic publication."""
+    """Application service orchestrating forecast pipeline lifecycle.
+
+    Design notes:
+    - Applies orchestration pattern: service owns scheduling, polling and publishing.
+    - Keeps transformation algorithm in ForecastAlgo to preserve clean boundaries.
+    - Uses lazy consumer initialization to avoid hard failure before Kafka is ready.
+    """
 
     def __init__(self) -> None:
         self.boot_config = BootsConfigLoader.get_boot("forecast_boot")
-        self.kafka_config = KafkaConfigLoader.get_kafka()
+        self.service_name = self.boot_config["service_name"]
+        self.timer_interval_seconds = float(self.boot_config["trigger"].get("timer_interval_seconds", 5.0))
+
         self.kafka_settings = KafkaRuntimeSettings(
-            service_name=self.boot_config["service_name"],
-            kafka_config=self.kafka_config,
+            service_name=self.service_name,
+            kafka_config=KafkaConfigLoader.get_kafka(),
         )
         self.weather_topic_name = TopicConfigLoader.topic_name("data_boot", "forecast_boot")
+
+
         self.forecast_topic_name = TopicConfigLoader.topic_name("forecast_boot", "execution_boot")
 
         self.publisher = KafkaPublisher(self.kafka_settings)
         self.weather_consumer_group = self.kafka_settings.consumer_group("weather")
         self.weather_consumer: Consumer | None = None
+        self.in_messages = ForecastInMessages()
+        self.out_messages = ForecastOutMessages()
         self.algo = ForecastAlgo(
-            service_name=self.boot_config["service_name"],
-            timer_interval_seconds=float(self.boot_config["trigger"].get("timer_interval_seconds", 5.0)),
+            service_name=self.service_name,
+            timer_interval_seconds=self.timer_interval_seconds,
             logger=logger,
         )
-        self.weather_scheduler = AsyncFixedRateScheduler(
-            name=f"{self.boot_config['service_name']}-fixed-rate-weather-pull",
-            interval_seconds=float(self.boot_config["trigger"].get("timer_interval_seconds", 5.0)),
-            callback=self._drain_weather_events,
+        self.update_scheduler = AsyncFixedRateScheduler(
+            name=f"{self.service_name}-fixed-rate-weather-pull",
+            interval_seconds=self.timer_interval_seconds,
+            callback=self._update,
         )
 
     def start_pipeline(self) -> None:
         """Start the fixed-rate scheduler that pulls weather messages every 5 seconds."""
-        self.weather_scheduler.start()
+        self.update_scheduler.start()
 
     def stop_pipeline(self) -> None:
         """Stop the scheduler and close the Kafka consumer."""
-        self.weather_scheduler.stop()
+        self.update_scheduler.stop()
         if self.weather_consumer is not None:
             self.weather_consumer.close()
             self.weather_consumer = None
@@ -58,7 +70,7 @@ class ForecastService:
         """Return latest consumed weather payload and published forecast payload."""
 
         return PipelineStatusResponse(
-            service_name=self.boot_config["service_name"],
+            service_name=self.service_name,
             last_consumed_event_id=(self.algo.last_received_event or {}).get("upstream_event_id"),
             last_published_event_id=(self.algo.last_published_event or {}).get("event_id"),
             details={
@@ -68,29 +80,27 @@ class ForecastService:
             },
         )
 
-    def _drain_weather_events(self) -> None:
-        """Framework callback that delegates fixed-rate draining to algorithm layer."""
+    def _update(self) -> None:
+        """Scheduler callback that drains currently available Kafka records.
+
+        The callback is intentionally resilient: a single bad message should not
+        tear down the scheduler loop for subsequent cycles.
+        """
 
         consumer = self._get_or_create_weather_consumer()
-        logger.warning(
+        logger.info(
             "forecast_boot fixed-rate tick service=%s interval_seconds=%s",
-            self.boot_config["service_name"],
-            self.algo.timer_interval_seconds,
+            self.service_name,
+            self.timer_interval_seconds,
         )
         if consumer is None:
-            logger.warning("Consumer is not available.")
+            logger.info("Consumer is not available; skip current cycle")
             return
 
-        processed_messages = 0
+        polled_payloads: list[bytes] = []
         while True:
             message = consumer.poll(0.1)
             if message is None:
-                logger.warning(
-                    "message is None for service=%s topic=%s interval_seconds=%s",
-                    self.boot_config["service_name"],
-                    self.weather_topic_name,
-                    self.algo.timer_interval_seconds,
-                )
                 break
             if message.error():
                 if self._is_partition_eof(message.error()):
@@ -99,50 +109,71 @@ class ForecastService:
                     logger.info(
                         "Kafka topic=%s is not available yet for service=%s; waiting for topic auto-creation",
                         self.weather_topic_name,
-                        self.boot_config["service_name"],
+                        self.service_name,
                     )
                     break
                 logger.warning(
                     "Kafka poll returned error service=%s topic=%s error=%s",
-                    self.boot_config["service_name"],
+                    self.service_name,
                     self.weather_topic_name,
                     message.error(),
                 )
                 break
 
             payload = message.value()
-            logger.warning(
-                "message is available for service=%s topic=%s interval_seconds=%s",
-                self.boot_config["service_name"],
-                self.weather_topic_name,
-                self.algo.timer_interval_seconds,
-            )
-            if not payload:
-                continue
+            if payload:
+                polled_payloads.append(payload)
 
-            forecast_event = self.algo.handle_weather_event(payload)
-            self.publisher.publish_proto(self.forecast_topic_name, forecast_event, key=forecast_event.enterprise_id)
-            logger.warning("forecast_boot published forecast event_id=%s", forecast_event.event_id)
-            processed_messages += 1
+        processed_messages = self._process_polled_batch(polled_payloads)
 
         if processed_messages:
-            logger.warning(
+            logger.info(
                 "forecast_boot fixed-rate cycle processed_messages=%s interval_seconds=%s",
                 processed_messages,
-                self.algo.timer_interval_seconds,
+                self.timer_interval_seconds,
             )
         else:
-            logger.warning(
+            logger.info(
                 "forecast_boot fixed-rate cycle idle topic=%s interval_seconds=%s",
                 self.weather_topic_name,
-                self.algo.timer_interval_seconds,
+                self.timer_interval_seconds,
             )
+
+    def _process_polled_batch(self, payloads: list[bytes]) -> int:
+        """Process one polled batch and publish all derived forecast events.
+
+        Returns:
+            Number of forecast events successfully published.
+        """
+
+        if not payloads:
+            return 0
+
+        # Preserve single-message path while enabling explicit queue-based batch path.
+        self.in_messages.data_boot_to_forecast_boot = payloads[0] if len(payloads) == 1 else None
+        self.in_messages.data_boot_to_forecast_boot_queue = payloads
+        try:
+            self.out_messages = self.algo.update(self.in_messages)
+        except Exception as exc:  # defensive boundary to keep scheduler alive
+            logger.exception("Failed to transform weather payload batch into forecast events: %s", exc)
+            return 0
+
+        events = self.out_messages.forecast_boot_to_execution_boot_queue
+        if not events and self.out_messages.forecast_boot_to_execution_boot is not None:
+            events = [self.out_messages.forecast_boot_to_execution_boot]
+
+        published = 0
+        for forecast_event in events:
+            self.publisher.publish_proto(self.forecast_topic_name, forecast_event, key=forecast_event.enterprise_id)
+            logger.info("forecast_boot published forecast event_id=%s", forecast_event.event_id)
+            published += 1
+        return published
 
     def _get_or_create_weather_consumer(self) -> Consumer | None:
         """Lazily create one Kafka consumer reused by the fixed-rate scheduler."""
 
         if not self.kafka_settings.kafka_enabled:
-            logger.info("Kafka consumer disabled for service=%s", self.boot_config["service_name"])
+            logger.info("Kafka consumer disabled for service=%s", self.service_name)
             return None
 
         if Consumer is None:
@@ -156,16 +187,16 @@ class ForecastService:
             {
                 "bootstrap.servers": self.kafka_settings.kafka_bootstrap_servers,
                 "group.id": self.weather_consumer_group,
-                "client.id": f"{self.kafka_settings.kafka_client_id}-{self.boot_config['service_name']}",
+                "client.id": f"{self.kafka_settings.kafka_client_id}-{self.service_name}",
                 "auto.offset.reset": self.kafka_settings.kafka_auto_offset_reset,
             }
         )
         self.weather_consumer.subscribe([self.weather_topic_name])
-        logger.warning(
+        logger.info(
             "forecast_boot AsyncIOScheduler fixed-rate consumer subscribed group=%s topic=%s interval_seconds=%s",
             self.weather_consumer_group,
             self.weather_topic_name,
-            self.algo.timer_interval_seconds,
+            self.timer_interval_seconds,
         )
         return self.weather_consumer
 
@@ -182,5 +213,5 @@ class ForecastService:
 
 @lru_cache(maxsize=1)
 def get_forecast_service() -> ForecastService:
-    """Return a singleton `ForecastService` instance for the FastAPI process."""
+    """Return a singleton ForecastService instance for the FastAPI process."""
     return ForecastService()

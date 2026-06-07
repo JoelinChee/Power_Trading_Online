@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Any, Dict
 
 from fastapi import FastAPI
 
-from boots.data_boot.controllers.data_controller import router as data_router
+from boots.data_boot.controllers.data_controller import root_router, router as data_router
 from boots.data_boot.controllers.health_controller import router as health_router
 from boots.data_boot.services.data_service import get_data_service
+from common.logging.logging import configure_logging
+
+
+# Configure process logging from centralized module.
+configure_logging()
 
 
 @asynccontextmanager
@@ -37,14 +41,8 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Data Boot", version="0.1.0", lifespan=lifespan)
 
-    @app.get("/")
-    def publish_weather_to_forecast() -> Dict[str, Any]:
-        """Publish a sample weather dataset when the browser visits data boot."""
-
-        service = get_data_service()
-        return service.publish_browser_weather()
-
     app.include_router(health_router)
+    app.include_router(root_router)
     app.include_router(data_router)
     return app
 

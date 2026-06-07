@@ -7,6 +7,11 @@ from fastapi import FastAPI
 from boots.execution_boot.controllers.execution_controller import router as execution_router
 from boots.execution_boot.controllers.health_controller import router as health_router
 from boots.execution_boot.services.execution_service import get_execution_service
+from common.logging.logging import configure_logging
+
+
+# Configure process logging from centralized module.
+configure_logging()
 
 
 @asynccontextmanager

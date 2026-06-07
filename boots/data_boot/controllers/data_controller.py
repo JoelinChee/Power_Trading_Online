@@ -8,15 +8,16 @@ from boots.data_boot.services.data_service import get_data_service
 from common.schemas import DataIngestionRequest, PipelineStatusResponse
 
 
+root_router = APIRouter(tags=["data"])
 router = APIRouter(prefix="/api/v1/data", tags=["data"])
 
 
-@router.get("/current")
-def get_current_data() -> dict:
-    """Return a sample real-time data snapshot for manual inspection."""
+@root_router.get("/")
+def update() -> dict:
+    """Publish a sample weather dataset when the browser visits data boot."""
 
     service = get_data_service()
-    return service.get_current_snapshot()
+    return service.update()
 
 
 @router.post("/ingest")

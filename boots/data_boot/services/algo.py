@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from google.protobuf.json_format import MessageToDict
-
 from generated import weather_pb2
 
 
@@ -16,54 +14,10 @@ class DataAlgo:
         self.last_published_event: dict[str, object] | None = None
         self.last_feedback_event: dict[str, object] | None = None
 
-    def get_current_snapshot(self) -> dict[str, object]:
-        """Return a mock real-time snapshot for manual API inspection."""
-
-        return {
-            "weather": {
-                "temperature_celsius": 31.6,
-                "humidity_ratio": 72.0,
-                "wind_speed_mps": 5.4,
-                "weather_type": "cloudy",
-            },
-            "load": {
-                "enterprise_id": "default-enterprise",
-                "timestamp": "2026-06-01T09:30:00+08:00",
-                "load_mw": 68.4,
-            },
-            "price": {
-                "timestamp": "2026-06-01T09:30:00+08:00",
-                "spot_price": 436.5,
-                "market": "real_time",
-            },
-            "renewable": {
-                "timestamp": "2026-06-01T09:30:00+08:00",
-                "wind_output_mw": 25.2,
-                "solar_output_mw": 18.9,
-            },
-        }
-
-    def build_browser_weather_dataset(self) -> weather_pb2.HourlyWeatherDataset:
+    def update(self) -> weather_pb2.HourlyWeatherDataset:
         """Build one sample hourly weather dataset for service-layer publication."""
 
         return self._build_hourly_weather_dataset()
-
-    def record_browser_weather_publication(
-        self,
-        dataset: weather_pb2.HourlyWeatherDataset,
-        weather_topic_name: str,
-    ) -> dict[str, object]:
-        """Record the result of one browser-triggered weather publication."""
-
-        self.last_published_event = MessageToDict(dataset, preserving_proto_field_name=True)
-        self.last_feedback_event = {
-            "accepted": True,
-            "message": "Kafka发送成功",
-            "topic": weather_topic_name,
-            "generated_at": dataset.generated_at,
-            "target_service": "forecast_boot",
-        }
-        return self.last_feedback_event
 
     def ingest(self, request: dict[str, dict[str, Any]]) -> dict[str, object]:
         """Accept an ingestion request without publishing to Kafka topics."""
