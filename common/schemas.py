@@ -6,51 +6,18 @@ views that expose recent Kafka pipeline state to the caller.
 
 from __future__ import annotations
 
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
-
-
-class WeatherSnapshot(BaseModel):
-    """Weather measurements collected by the data boot service."""
-
-    temperature_celsius: float = Field(..., description="Ambient temperature in degrees Celsius.")
-    humidity_ratio: float = Field(..., description="Relative humidity percentage, represented as a numeric ratio on a 0-100 scale.")
-    wind_speed_mps: float = Field(..., description="Measured wind speed in meters per second.")
-    weather_type: str = Field(..., description="Short categorical description of the weather state, such as cloudy or sunny.")
-
-
-class LoadSnapshot(BaseModel):
-    """Enterprise load measurement captured at a specific timestamp."""
-
-    enterprise_id: str = Field(..., description="Enterprise identifier used to correlate all downstream forecast and execution events.")
-    timestamp: str = Field(..., description="Observation timestamp in ISO 8601 format.")
-    load_mw: float = Field(..., description="Instantaneous enterprise load in megawatts.")
-
-
-class PriceSnapshot(BaseModel):
-    """Observed market price snapshot used as forecast input."""
-
-    timestamp: str = Field(..., description="Price observation timestamp in ISO 8601 format.")
-    spot_price: float = Field(..., description="Observed market clearing or spot price value.")
-    market: Literal["day_ahead", "real_time"] = Field(default="real_time", description="Market segment associated with the observed price.")
-
-
-class RenewableSnapshot(BaseModel):
-    """Renewable generation measurement used as execution context."""
-
-    timestamp: str = Field(..., description="Renewable output observation timestamp in ISO 8601 format.")
-    wind_output_mw: float = Field(..., description="Measured wind generation output in megawatts.")
-    solar_output_mw: float = Field(..., description="Measured solar generation output in megawatts.")
 
 
 class DataIngestionRequest(BaseModel):
     """Composite request submitted to the data ingestion HTTP API."""
 
-    weather: WeatherSnapshot = Field(..., description="Current weather observation payload.")
-    load: LoadSnapshot = Field(..., description="Current enterprise load observation payload.")
-    price: PriceSnapshot = Field(..., description="Current market price observation payload.")
-    renewable: RenewableSnapshot = Field(..., description="Current renewable generation observation payload.")
+    weather: Dict[str, object] = Field(..., description="Current weather observation payload.")
+    load: Dict[str, object] = Field(..., description="Current enterprise load observation payload.")
+    price: Dict[str, object] = Field(..., description="Current market price observation payload.")
+    renewable: Dict[str, object] = Field(..., description="Current renewable generation observation payload.")
 
 
 class PipelineStatusResponse(BaseModel):

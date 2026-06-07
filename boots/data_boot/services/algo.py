@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from google.protobuf.json_format import MessageToDict
 
 from generated import weather_pb2
-from common.schemas import DataIngestionRequest
 
 
 class DataAlgo:
@@ -65,18 +65,23 @@ class DataAlgo:
         }
         return self.last_feedback_event
 
-    def ingest(self, request: DataIngestionRequest) -> dict[str, object]:
+    def ingest(self, request: dict[str, dict[str, Any]]) -> dict[str, object]:
         """Accept an ingestion request without publishing to Kafka topics."""
+
+        weather_payload = request["weather"]
+        load_payload = request["load"]
+        price_payload = request["price"]
+        renewable_payload = request["renewable"]
 
         self.last_published_event = {
             "source_service": self.service_name,
-            "published_at": request.load.timestamp,
-            "enterprise_id": request.load.enterprise_id,
-            "target_date": request.load.timestamp[:10],
-            "weather": request.weather.model_dump(),
-            "load": request.load.model_dump(),
-            "price": request.price.model_dump(),
-            "renewable": request.renewable.model_dump(),
+            "published_at": str(load_payload["timestamp"]),
+            "enterprise_id": str(load_payload["enterprise_id"]),
+            "target_date": str(load_payload["timestamp"])[:10],
+            "weather": dict(weather_payload),
+            "load": dict(load_payload),
+            "price": dict(price_payload),
+            "renewable": dict(renewable_payload),
         }
         self.last_feedback_event = {
             "accepted": True,

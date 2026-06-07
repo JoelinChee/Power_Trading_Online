@@ -50,11 +50,11 @@ class ExecutionService:
         Returns:
             A risk decision object with approval flag, score, and reasons.
         """
-        return self.algo.risk_check(request)
+        return RiskCheckResponse(**self.algo.risk_check(request.model_dump()))
 
     def create_trade_order(self, request: TradeOrderRequest) -> TradeOrderResponse:
         """Create a mock day-ahead purchase order from a validated request."""
-        return self.algo.create_trade_order(request)
+        return TradeOrderResponse(**self.algo.create_trade_order(request.model_dump()))
 
     def start_pipeline(self) -> None:
         """Start the forecast topic consumer."""

@@ -6,7 +6,9 @@ from uuid import uuid4
 from google.protobuf.json_format import MessageToDict
 
 from generated import trading_messages_pb2, weather_pb2
-from common.schemas import SeriesPoint
+
+
+ForecastPoint = tuple[int, float]
 
 
 class ForecastAlgo:
@@ -76,31 +78,31 @@ class ForecastAlgo:
 		forecast_event.weather_type = weather_type
 		forecast_event.available_renewable_mw = renewable_mw
 
-		for point in weather_points:
+		for slot, value in weather_points:
 			proto_point = forecast_event.weather_points.add()
-			proto_point.slot = point.slot
-			proto_point.value = point.value
+			proto_point.slot = slot
+			proto_point.value = value
 
-		for point in load_points:
+		for slot, value in load_points:
 			proto_point = forecast_event.load_points.add()
-			proto_point.slot = point.slot
-			proto_point.value = point.value
+			proto_point.slot = slot
+			proto_point.value = value
 
-		for point in price_points:
+		for slot, value in price_points:
 			proto_point = forecast_event.price_points.add()
-			proto_point.slot = point.slot
-			proto_point.value = point.value
+			proto_point.slot = slot
+			proto_point.value = value
 
 		return forecast_event
 
 	def _build_forecast_points(
 		self, dataset: weather_pb2.HourlyWeatherDataset
-	) -> tuple[list[SeriesPoint], list[SeriesPoint], list[SeriesPoint], str, str, str, str, float]:
+	) -> tuple[list[ForecastPoint], list[ForecastPoint], list[ForecastPoint], str, str, str, str, float]:
 		"""Build synthetic weather/load/price forecast points from one weather dataset."""
 
-		weather_points: list[SeriesPoint] = []
-		load_points: list[SeriesPoint] = []
-		price_points: list[SeriesPoint] = []
+		weather_points: list[ForecastPoint] = []
+		load_points: list[ForecastPoint] = []
+		price_points: list[ForecastPoint] = []
 
 		daily = dataset.daily_weather[0] if dataset.daily_weather else None
 		hourly = list(daily.hourly_weather) if daily and daily.hourly_weather else []
@@ -122,16 +124,16 @@ class ForecastAlgo:
 
 			weather_adjustment = ((slot % 16) - 8) * 0.18
 			weather_value = round(weather_seed + weather_adjustment, 2)
-			weather_points.append(SeriesPoint(slot=slot, value=weather_value))
+			weather_points.append((slot, weather_value))
 
 			peak_factor = 1.18 if 33 <= slot <= 76 else 0.92
 			intra_day_adjustment = ((slot % 12) - 6) * 0.35
 			load_value = round(base_load * peak_factor + intra_day_adjustment, 2)
-			load_points.append(SeriesPoint(slot=slot, value=load_value))
+			load_points.append((slot, load_value))
 
 			demand_factor = 1.12 if 29 <= slot <= 80 else 0.95
 			volatility = ((slot % 8) - 4) * 1.8
 			price_value = round(base_price * demand_factor + volatility, 2)
-			price_points.append(SeriesPoint(slot=slot, value=price_value))
+			price_points.append((slot, price_value))
 
 		return weather_points, load_points, price_points, weather_type, target_date, enterprise_id, published_at, renewable_mw

@@ -48,7 +48,7 @@ class DataService:
         Returns:
             Response payload that confirms the request was accepted.
         """
-        return self.algo.ingest(request)
+        return self.algo.ingest(request.model_dump())
 
     def start_pipeline(self) -> None:
         """Data boot has no background worker in the current pipeline design."""
