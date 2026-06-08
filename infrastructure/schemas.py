@@ -30,13 +30,6 @@ class PipelineStatusResponse(BaseModel):
     details: Dict[str, object] = Field(default_factory=dict, description="Expanded debugging payload that includes the latest serialized event content.")
 
 
-class SeriesPoint(BaseModel):
-    """Single point in a 96-slot day-ahead forecast series."""
-
-    slot: int = Field(..., ge=1, le=96, description="Quarter-hour slot number in the 96-point daily forecast horizon.")
-    value: float = Field(..., description="Forecasted metric value associated with the slot.")
-
-
 class RiskCheckRequest(BaseModel):
     """Input payload for the synchronous execution risk-check API."""
 

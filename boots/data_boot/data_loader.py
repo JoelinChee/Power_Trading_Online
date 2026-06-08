@@ -4,7 +4,7 @@ from pathlib import Path
 import os
 from typing import Any
 
-from boots.common.loader_base import BaseConfigReader
+from infrastructure.loaders.loader_base import BaseConfigReader
 
 
 class DataAlgoConfigLoader(BaseConfigReader):

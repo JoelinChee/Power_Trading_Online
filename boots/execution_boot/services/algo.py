@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from google.protobuf.json_format import MessageToDict
 
-from boots.execution_boot.services.messages import ExecutionInMessages, ExecutionOutMessages
+from boots.execution_boot.services.messages import ExecutionInMessages
 from generated import trading_messages_pb2
 
 
@@ -20,20 +20,15 @@ class ExecutionAlgo:
         self.last_consumed_event: dict[str, object] | None = None
         self.last_processed_result: dict[str, object] | None = None
 
-    def update(self, in_messages: ExecutionInMessages) -> ExecutionOutMessages:
+    def update(self, in_messages: ExecutionInMessages) -> None:
         """Consume one batch of forecast payloads and produce execution results."""
 
         payloads = self._resolve_inbound_payloads(in_messages)
         if not payloads:
             raise ValueError("Missing inbound forecast payload batch")
 
-        generated_results: list[dict[str, object]] = []
         for payload in payloads:
-            generated_results.append(self._process_one_forecast_payload(payload))
-
-        return ExecutionOutMessages(
-            execution_result_queue=generated_results,
-        )
+            self._process_one_forecast_payload(payload)
 
     def _resolve_inbound_payloads(self, in_messages: ExecutionInMessages) -> list[bytes]:
         """Resolve inbound payload batch from the message contract object."""

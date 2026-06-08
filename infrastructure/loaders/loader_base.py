@@ -7,7 +7,6 @@ third-party YAML/logging helpers so it can run in a clean repository checkout.
 from __future__ import annotations
 
 from ast import literal_eval
-import os
 from pathlib import Path
 from typing import Any, Optional, Union
 import json
@@ -16,22 +15,6 @@ from infrastructure.logging.logging import get_logger
 
 
 logger = get_logger(__name__)
-
-
-def resolve_project_root() -> Path:
-    """Resolve runtime project root for both source and bundled binary runs."""
-
-    runtime_root = os.getenv("POWER_TRADING_HOME", "").strip()
-    if runtime_root:
-        return Path(runtime_root).resolve()
-    return Path(__file__).resolve().parents[2]
-
-
-def resolve_config_path(*parts: str) -> Path:
-    """Build a config file path from the resolved runtime project root."""
-
-    return resolve_project_root().joinpath("config", *parts)
-
 
 class BaseConfigReader:
     """Reusable singleton configuration reader.
@@ -285,4 +268,4 @@ class BaseConfigReader:
         return raw_value
 
 
-__all__ = ["BaseConfigReader", "resolve_project_root", "resolve_config_path"]
+__all__ = ["BaseConfigReader"]
