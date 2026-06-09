@@ -218,6 +218,59 @@ curl -s http://127.0.0.1:8003/health
 
 ## 8. 联调与冒烟测试
 
+## 9. Kafka 数据录制与回灌
+
+为了支持问题复现与离线回放，提供两个脚本：
+
+- `scripts/kafka_record.py`：从指定 topic 录制消息到 NDJSON 文件。
+- `scripts/kafka_replay.py`：从 NDJSON 文件回灌消息到 Kafka。
+
+录制示例（录制 200 条天气事件）：
+
+```bash
+conda run -n test_RL python scripts/kafka_record.py \
+	--topic power_trading.weather.events \
+	--output generated/recordings/weather.ndjson \
+	--max-messages 200 \
+	--from-beginning
+```
+
+录制示例（录制所有 topic）：
+
+```bash
+conda run -n test_RL python scripts/kafka_record.py \
+	--all-topics \
+	--output generated/recordings/all_topics.ndjson \
+	--max-seconds 60 \
+	--from-beginning
+```
+
+按正则录制示例（只录 power_trading 前缀）：
+
+```bash
+conda run -n test_RL python scripts/kafka_record.py \
+	--topic-pattern '^power_trading\\..*$' \
+	--output generated/recordings/power_trading.ndjson \
+	--max-messages 500 \
+	--from-beginning
+```
+
+回灌示例（回灌到隔离 topic，并以 20 msg/s 限速）：
+
+```bash
+conda run -n test_RL python scripts/kafka_replay.py \
+	--input generated/recordings/weather.ndjson \
+	--target-topic power_trading.weather.events.replay \
+	--rate 20
+```
+
+说明：
+
+- 录制文件保留原始 `key/value` 字节（base64）与 `headers`、`timestamp`、`offset`。
+- 录制支持单 topic、全 topic（`--all-topics`）和正则匹配（`--topic-pattern`）。
+- `--preserve-intervals` 可按原始消息时间间隔回放。
+- 建议优先回灌到隔离 topic，再切换消费者验证链路。
+
 本地启动后可执行动态联调：
 
 ```bash

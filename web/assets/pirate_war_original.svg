@@ -1,0 +1,61 @@
+<svg width="1280" height="540" viewBox="0 0 1280 540" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sea" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#1c2c55"/>
+      <stop offset="55%" stop-color="#311957"/>
+      <stop offset="100%" stop-color="#132642"/>
+    </linearGradient>
+    <linearGradient id="flare" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0%" stop-color="#52f2ff"/>
+      <stop offset="50%" stop-color="#ff72d9"/>
+      <stop offset="100%" stop-color="#8fff9f"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffe9a6" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#ffe9a6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1280" height="540" fill="url(#sea)"/>
+  <circle cx="980" cy="120" r="170" fill="url(#sun)"/>
+
+  <g opacity="0.28" stroke="url(#flare)" stroke-width="2">
+    <path d="M0 390 C210 340, 420 440, 640 395 S1040 330, 1280 390"/>
+    <path d="M0 425 C220 375, 420 475, 640 430 S1040 365, 1280 425"/>
+  </g>
+
+  <g fill="#0a1022" stroke="url(#flare)" stroke-width="3">
+    <path d="M180 410 L230 320 L280 410 Z"/>
+    <circle cx="230" cy="298" r="22"/>
+    <path d="M215 280 L245 280 L240 250 L220 250 Z"/>
+
+    <path d="M350 420 L410 310 L470 420 Z"/>
+    <circle cx="410" cy="286" r="26"/>
+    <path d="M395 262 L425 262 L445 238 L418 236 Z"/>
+
+    <path d="M560 430 L620 320 L680 430 Z"/>
+    <circle cx="620" cy="296" r="24"/>
+    <path d="M595 272 C610 244, 632 244, 647 272" fill="none"/>
+
+    <path d="M760 428 L825 318 L890 428 Z"/>
+    <circle cx="825" cy="295" r="25"/>
+    <path d="M810 272 L840 272 L835 248 L815 248 Z"/>
+
+    <path d="M975 420 L1040 302 L1105 420 Z"/>
+    <circle cx="1040" cy="278" r="28"/>
+    <path d="M1024 248 C1032 228, 1048 228, 1056 248" fill="none"/>
+  </g>
+
+  <g stroke="url(#flare)" stroke-width="4" fill="none" opacity="0.95">
+    <path d="M80 508 H1200"/>
+    <path d="M130 470 L190 452"/>
+    <path d="M1060 450 L1140 470"/>
+  </g>
+
+  <g fill="#eaf7ff" font-family="Segoe UI, Arial, sans-serif" font-size="34" font-weight="700">
+    <text x="52" y="74">ORIGINAL PIRATE BATTLE CREW</text>
+  </g>
+  <g fill="#d7e9ff" font-family="Segoe UI, Arial, sans-serif" font-size="20">
+    <text x="54" y="108">Manga-inspired silhouettes for a high-energy warfront atmosphere.</text>
+  </g>
+</svg>
