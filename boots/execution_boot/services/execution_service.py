@@ -4,7 +4,7 @@ from functools import lru_cache
 
 from boots.execution_boot.execution_loader import ExecutionAlgoConfigLoader
 from boots.execution_boot.services.algo import ExecutionAlgo
-from boots.execution_boot.services.messages import ExecutionInMessages, ExecutionOutMessages
+from boots.execution_boot.services.messages import ExecutionInMessages
 from infrastructure.loaders.boots_loader import BootsConfigLoader
 from infrastructure.loaders.kafka_loader import KafkaConfigLoader, KafkaRuntimeSettings
 from infrastructure.loaders.topic_loader import TopicConfigLoader
@@ -28,15 +28,13 @@ class ExecutionService:
     def __init__(self) -> None:
         self.boot_config = BootsConfigLoader.get_boot("execution_boot")
         self.service_name = self.boot_config["service_name"]
-        self.kafka_config = KafkaConfigLoader.get_kafka()
         self.kafka_settings = KafkaRuntimeSettings(
             service_name=self.service_name,
-            kafka_config=self.kafka_config,
+            kafka_config=KafkaConfigLoader.get_kafka(),
         )
         self.forecast_topic_name = TopicConfigLoader.topic_name("forecast_boot", "execution_boot")
 
         self.in_messages = ExecutionInMessages()
-        self.out_messages = ExecutionOutMessages()
         self.algo = ExecutionAlgo(
             service_name=self.service_name,
             logger=logger,
@@ -91,7 +89,7 @@ class ExecutionService:
 
         self.in_messages.forecast_boot_to_execution_boot_queue = [payload]
         try:
-            self.out_messages = self.algo.update(self.in_messages)
+            self.algo.update(self.in_messages)
         except Exception as exc:
             logger.exception("Failed to transform forecast payload into execution result: %s", exc)
 

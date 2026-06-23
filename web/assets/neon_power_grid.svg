@@ -1,0 +1,53 @@
+<svg width="1200" height="420" viewBox="0 0 1200 420" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#07132d"/>
+      <stop offset="50%" stop-color="#2c1352"/>
+      <stop offset="100%" stop-color="#10294a"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0%" stop-color="#5ef3ff"/>
+      <stop offset="100%" stop-color="#ff6dd8"/>
+    </linearGradient>
+    <radialGradient id="orbA" cx="35%" cy="35%" r="55%">
+      <stop offset="0%" stop-color="#6dff77" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#6dff77" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="orbB" cx="50%" cy="50%" r="55%">
+      <stop offset="0%" stop-color="#4ffcff" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#4ffcff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="420" fill="url(#bg)"/>
+
+  <g opacity="0.22" stroke="url(#line)" stroke-width="1">
+    <path d="M0 60 H1200"/>
+    <path d="M0 120 H1200"/>
+    <path d="M0 180 H1200"/>
+    <path d="M0 240 H1200"/>
+    <path d="M0 300 H1200"/>
+    <path d="M0 360 H1200"/>
+    <path d="M120 0 V420"/>
+    <path d="M240 0 V420"/>
+    <path d="M360 0 V420"/>
+    <path d="M480 0 V420"/>
+    <path d="M600 0 V420"/>
+    <path d="M720 0 V420"/>
+    <path d="M840 0 V420"/>
+    <path d="M960 0 V420"/>
+    <path d="M1080 0 V420"/>
+  </g>
+
+  <circle cx="250" cy="150" r="140" fill="url(#orbA)"/>
+  <circle cx="880" cy="260" r="180" fill="url(#orbB)"/>
+
+  <g stroke="url(#line)" stroke-width="3" fill="none" opacity="0.9">
+    <path d="M110 310 C230 210, 320 210, 430 300 S670 390, 780 290 S980 150, 1090 235"/>
+    <path d="M80 240 C200 140, 330 155, 460 235 S700 350, 830 250 S1020 110, 1130 205" opacity="0.65"/>
+  </g>
+
+  <g fill="#e9f6ff" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="700" opacity="0.95">
+    <text x="68" y="76">POWER FLOW VISUAL</text>
+  </g>
+</svg>

@@ -1,8 +1,7 @@
-from .kafka import Consumer, KafkaConsumerWorker, KafkaError, KafkaPublisher, Producer
+from .kafka import Consumer, KafkaConsumerWorker, KafkaError, KafkaPublisher
 
 __all__ = [
     "Consumer",
-    "Producer",
     "KafkaError",
     "KafkaPublisher",
     "KafkaConsumerWorker",

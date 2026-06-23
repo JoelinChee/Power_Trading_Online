@@ -19,10 +19,9 @@ class DataService:
 
     def __init__(self) -> None:
         self.boot_config = BootsConfigLoader.get_boot("data_boot")
-        self.kafka_config = KafkaConfigLoader.get_kafka()
         self.kafka_settings = KafkaRuntimeSettings(
             service_name=self.boot_config["service_name"],
-            kafka_config=self.kafka_config,
+            kafka_config=KafkaConfigLoader.get_kafka(),
         )
         self.weather_topic_name = TopicConfigLoader.topic_name("data_boot", "forecast_boot")
         self.publisher = KafkaPublisher(self.kafka_settings)
