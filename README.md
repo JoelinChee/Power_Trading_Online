@@ -220,61 +220,116 @@ curl -s http://127.0.0.1:8003/health
 
 ## 9. Kafka 数据录制与回灌
 
-为了支持问题复现与离线回放，提供两个脚本：
+为了支持问题复现与离线回放，提供一组对标 `rostopic` / `rosbag` 的 Kafka 工具脚本：
 
-- `scripts/kafka_record.py`：从指定 topic 录制消息到 NDJSON 文件。
-- `scripts/kafka_replay.py`：从 NDJSON 文件回灌消息到 Kafka。
+- `scripts/kafka/kafka_topic_list.sh`：列出 Kafka topics。
+- `scripts/kafka/kafka_topic_echo.sh`：实时打印单个或多个 topic。
+- `scripts/kafka/kafka_record.py`：录制单个、多个或全部 topic 到二进制 `.bin` 文件。
+- `scripts/kafka/kafka_play.py`：按录制间隔、全速或限速回放到 Kafka。
+- `scripts/kafka/kafka_info.sh`：查看录制文件大小、消息数、topic 分布和预览。
+
+建议先设置 broker 环境变量：
+
+```bash
+export BROKERS=127.0.0.1:9092
+```
+
+列出 topic：
+
+```bash
+scripts/kafka/kafka_topic_list.sh
+```
+
+实时打印 topic：
+
+```bash
+scripts/kafka/kafka_topic_echo.sh power_trading.weather.events
+```
+
+默认会加载 `generated/*_pb2.py`，按 topic 将 Protobuf payload 解析成缩进 JSON；连续消息之间用 `---` 分隔，风格接近 `rostopic echo`。确实需要原始 payload 时可显式开启：
+
+```bash
+scripts/kafka/kafka_topic_echo.sh --raw power_trading.weather.events
+```
+
+如果需要单行 JSON，使用：
+
+```bash
+scripts/kafka/kafka_topic_echo.sh --compact power_trading.weather.events
+```
 
 录制示例（录制 200 条天气事件）：
 
 ```bash
-conda run -n test_RL python scripts/kafka_record.py \
-	--topic power_trading.weather.events \
-	--output generated/recordings/weather.ndjson \
+scripts/kafka/kafka_record.sh \
+	power_trading.weather.events \
+	--output generated/recordings/weather.bin \
 	--max-messages 200 \
 	--from-beginning
 ```
 
-录制示例（录制所有 topic）：
+录制示例（录制多个 topic，从历史开头读到当前末尾后退出）：
 
 ```bash
-conda run -n test_RL python scripts/kafka_record.py \
+scripts/kafka/kafka_record.sh \
+	power_trading.weather.events,power_trading.forecast.events \
+	--output generated/recordings/power_trading.bin \
+	--from-beginning \
+	--end-on-eof
+```
+
+录制示例（录制所有非内部 topic）：
+
+```bash
+scripts/kafka/kafka_record.sh \
 	--all-topics \
-	--output generated/recordings/all_topics.ndjson \
-	--max-seconds 60 \
-	--from-beginning
+	--output generated/recordings/all_topics.bin \
+	--from-beginning \
+	--end-on-eof
 ```
 
-按正则录制示例（只录 power_trading 前缀）：
+查看录制文件信息：
 
 ```bash
-conda run -n test_RL python scripts/kafka_record.py \
-	--topic-pattern '^power_trading\\..*$' \
-	--output generated/recordings/power_trading.ndjson \
-	--max-messages 500 \
-	--from-beginning
+scripts/kafka/kafka_info.sh generated/recordings/all_topics.bin
 ```
 
-回灌示例（回灌到隔离 topic，并以 20 msg/s 限速）：
+按录制时的消息间隔回放到原 topic（默认，类似 `rosbag play`）：
 
 ```bash
-conda run -n test_RL python scripts/kafka_replay.py \
-	--input generated/recordings/weather.ndjson \
+scripts/kafka/kafka_play.sh \
+	--input generated/recordings/all_topics.bin
+```
+
+全速回放到原 topic：
+
+```bash
+scripts/kafka/kafka_play.sh \
+	--input generated/recordings/all_topics.bin \
+	--full-speed
+```
+
+限速回放到隔离 topic：
+
+```bash
+scripts/kafka/kafka_play.sh \
+	--input generated/recordings/weather.bin \
 	--target-topic power_trading.weather.events.replay \
 	--rate 20
 ```
 
 说明：
 
-- 录制文件保留原始 `key/value` 字节（base64）与 `headers`、`timestamp`、`offset`。
-- 录制支持单 topic、全 topic（`--all-topics`）和正则匹配（`--topic-pattern`）。
-- `--preserve-intervals` 可按原始消息时间间隔回放。
+- 录制文件使用长度分帧二进制格式，保留原始 `key/value` 字节与 `headers`、`timestamp`、`offset`。
+- 录制支持单 topic、多个 topic 和全 topic（`--all-topics`）。
+- 回放默认按原始消息时间戳间隔发送；`--full-speed` 可全速回放，`--rate` 可固定速率回放。
+- 回放时会在 stderr 打印类似 `rosbag play` 的进度，例如 `12.3s / 61.1s (5/26, 19.2%)`。
 - 建议优先回灌到隔离 topic，再切换消费者验证链路。
 
 本地启动后可执行动态联调：
 
 ```bash
-python3 scripts/kafka_pipeline_smoke_test.py
+python3 scripts/kafka/kafka_pipeline_smoke_test.py
 ```
 
 该脚本会触发 `data_boot -> forecast_boot -> execution_boot` 的主链路。
