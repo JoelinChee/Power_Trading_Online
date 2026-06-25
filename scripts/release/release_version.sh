@@ -3,20 +3,21 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-VERSION_FILE="$REPO_ROOT/VERSION"
+source "$SCRIPT_DIR/../common.sh"
+
+VERSION_FILE="$PTO_REPO_ROOT/VERSION"
 
 usage() {
     cat <<'EOF'
 Usage:
-  scripts/release_version.sh --show
-  scripts/release_version.sh --set <version>
-  scripts/release_version.sh --bump <major|minor|patch>
+    scripts/release/release_version.sh --show
+    scripts/release/release_version.sh --set <version>
+    scripts/release/release_version.sh --bump <major|minor|patch>
 
 Examples:
-  scripts/release_version.sh --show
-  scripts/release_version.sh --set 1.2.0
-  scripts/release_version.sh --bump patch
+    scripts/release/release_version.sh --show
+    scripts/release/release_version.sh --set 1.2.0
+    scripts/release/release_version.sh --bump patch
 EOF
 }
 
@@ -26,6 +27,8 @@ if [[ ! -f "$VERSION_FILE" ]]; then
 fi
 
 read_current_version() {
+    # VERSION is a single-line semantic version file; strip whitespace so the
+    # value can be safely embedded in archive names and build metadata.
     tr -d '[:space:]' <"$VERSION_FILE"
 }
 
@@ -39,6 +42,8 @@ validate_version() {
 
 write_version() {
     local version="$1"
+    # Always end the file with a newline so shell tools and package metadata
+    # readers see the same clean value.
     printf '%s\n' "$version" >"$VERSION_FILE"
     echo "$version"
 }
@@ -50,7 +55,7 @@ fi
 
 case "$1" in
 --show)
-    read_current_version
+    printf '%s\n' "$(read_current_version)"
     ;;
 --set)
     if [[ $# -ne 2 ]]; then

@@ -2,12 +2,10 @@
 
 set -euo pipefail
 
-# Resolve all important paths from the script location so this entry point is
-# safe to execute from any current working directory.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ARTIFACTS_ROOT="$REPO_ROOT/generated"
-RUNTIME_DIR="$ARTIFACTS_ROOT/kafka-local"
+source "$SCRIPT_DIR/../common.sh"
+
+RUNTIME_DIR="$PTO_ARTIFACTS_ROOT/kafka-local"
 KAFKA_VERSION="3.7.1"
 SCALA_VERSION="2.13"
 KAFKA_DIR="$RUNTIME_DIR/kafka_${SCALA_VERSION}-${KAFKA_VERSION}"
@@ -28,6 +26,8 @@ SERVER_LOG="$RUNTIME_DIR/server.out"
 BOOTSTRAP_SERVER="127.0.0.1:9092"
 
 wait_for_kafka_ready() {
+    # kafka-topics.sh exercises the broker API, which is stronger than a raw
+    # socket check: the port can be open before the broker is ready for clients.
     for _ in {1..30}; do
         if "$KAFKA_DIR/bin/kafka-topics.sh" --bootstrap-server "$BOOTSTRAP_SERVER" --list >/dev/null 2>&1; then
             echo "Kafka is ready on $BOOTSTRAP_SERVER"
@@ -46,11 +46,14 @@ wait_for_kafka_ready() {
     return 1
 }
 
-# Create the external runtime directory tree outside the repository.
+pto_prepare_runtime_dirs
+
+# Keep Kafka downloads, logs, PID files, and KRaft metadata under generated/ so
+# local broker runs never modify source-controlled project files.
 mkdir -p "$RUNTIME_DIR"
 
 # Remove any stale JVM replay files from the repository if they exist from old runs.
-find "$REPO_ROOT" -maxdepth 1 \( -name 'hs_err_pid*.log' -o -name 'replay_pid*.log' \) -delete
+find "$PTO_REPO_ROOT" -maxdepth 1 \( -name 'hs_err_pid*.log' -o -name 'replay_pid*.log' \) -delete
 
 # Exit early when a healthy Kafka process is already registered.
 if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
@@ -67,6 +70,10 @@ if [[ ! -d "$KAFKA_DIR" ]]; then
     fi
 
     if [[ ! -f "$ARCHIVE_PATH" ]]; then
+        if ! command -v aria2c >/dev/null 2>&1; then
+            pto_require_command wget "Install wget or aria2c to download Kafka automatically."
+        fi
+
         downloaded=false
         for url in "${MIRROR_URLS[@]}"; do
             echo "正在尝试下载 Kafka: $url"

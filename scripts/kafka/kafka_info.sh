@@ -2,11 +2,16 @@
 
 set -euo pipefail
 
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+
 usage() {
     cat <<EOF
 Usage: $(basename "$0") RECORDING.bin
 
 Show basic information for a kafka_record.py bin recording.
+
+Environment:
+    PYTHON_BIN   Python interpreter used for parsing. Default: python3
 EOF
 }
 
@@ -23,7 +28,7 @@ fi
 
 echo "File: $RECORDING"
 ls -lh "$RECORDING"
-python - "$RECORDING" <<'PY'
+"$PYTHON_BIN" - "$RECORDING" <<'PY'
 from __future__ import annotations
 
 import json

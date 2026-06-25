@@ -2,37 +2,29 @@
 
 set -euo pipefail
 
-# Resolve all important paths from the script location so first-run setup works
-# from any current working directory.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ARTIFACTS_ROOT="$REPO_ROOT/generated"
-LEGACY_ARTIFACTS_ROOT="$REPO_ROOT/../Power_Trading_Online_artifacts"
-PYCACHE_DIR="$ARTIFACTS_ROOT/pycache"
+source "$SCRIPT_DIR/../common.sh"
+
+LEGACY_ARTIFACTS_ROOT="$PTO_REPO_ROOT/../Power_Trading_Online_artifacts"
 CONDA_ENV_NAME="${CONDA_ENV_NAME:-power_trading_online}"
 CONDA_PYTHON_VERSION="${CONDA_PYTHON_VERSION:-3.12}"
 
-# Create external artifact folders up front so setup never writes caches into the repo.
-mkdir -p "$ARTIFACTS_ROOT" "$PYCACHE_DIR"
+pto_prepare_runtime_dirs
 
 # Remove the old sibling artifact directory left by previous repository layouts.
 if [[ -d "$LEGACY_ARTIFACTS_ROOT" ]]; then
     rm -rf "$LEGACY_ARTIFACTS_ROOT"
 fi
 
-# Bootstrap the repository-local environment file on the first setup run.
-if [[ ! -f "$REPO_ROOT/.env" ]]; then
-    cp "$REPO_ROOT/.env.example" "$REPO_ROOT/.env"
-fi
+pto_bootstrap_env_file
 
 # Clear repository-local Python bytecode and stale JVM crash replay files left by older runs.
-find "$REPO_ROOT" -type d -name '__pycache__' -prune -exec rm -rf {} +
-find "$REPO_ROOT" \( -name '*.pyc' -o -name '*.pyo' -o -name 'hs_err_pid*.log' -o -name 'replay_pid*.log' \) -delete
+find "$PTO_REPO_ROOT" -type d -name '__pycache__' -prune -exec rm -rf {} +
+find "$PTO_REPO_ROOT" \( -name '*.pyc' -o -name '*.pyo' -o -name 'hs_err_pid*.log' -o -name 'replay_pid*.log' \) -delete
 
 # Create and use a dedicated conda environment for all project dependencies.
 if ! command -v conda >/dev/null 2>&1; then
-    echo "conda is required to install the project environment." >&2
-    exit 1
+    pto_die "conda is required to install the project environment."
 fi
 
 CONDA_BASE="$(conda info --base)"
@@ -51,40 +43,35 @@ PYTHON_BIN="$CONDA_ENV_DIR/bin/python"
 conda install -n "$CONDA_ENV_NAME" -c conda-forge kafkacat -y
 
 # Install Python dependencies from the environment manifest using the selected interpreter.
-PYTHONPYCACHEPREFIX="$PYCACHE_DIR" "$PYTHON_BIN" -m pip install -r "$REPO_ROOT/environment/requirements.txt"
+PYTHONPYCACHEPREFIX="$PTO_PYCACHE_DIR" "$PYTHON_BIN" -m pip install -r "$PTO_REPO_ROOT/environment/requirements.txt"
 
 # Compile protobuf modules into the repository-local generated directory.
-PYTHON_BIN="$PYTHON_BIN" "$SCRIPT_DIR/compile_protos.sh"
+PYTHON_BIN="$PYTHON_BIN" "$SCRIPT_DIR/../proto/compile_protos.sh"
 
 # Download, extract, and verify the local Kafka distribution once so the first
 # startup has everything it needs.
-"$SCRIPT_DIR/start_local_kafka.sh"
-
-for _ in {1..40}; do
-    if PYTHONPYCACHEPREFIX="$PYCACHE_DIR" "$PYTHON_BIN" - <<'PY'
-import socket
-
-sock = socket.socket()
-sock.settimeout(1)
-try:
-    sock.connect(("127.0.0.1", 9092))
-    raise SystemExit(0)
-except OSError:
-    raise SystemExit(1)
-finally:
-    sock.close()
-PY
-    then
-        break
+cleanup_kafka=0
+cleanup_started_kafka() {
+    if [[ "$cleanup_kafka" -eq 1 ]]; then
+        "$SCRIPT_DIR/../kafka/stop_local_kafka.sh" >/dev/null 2>&1 || true
     fi
-    sleep 1
-done
+}
 
-# Stop Kafka after verification so the stack can later be started cleanly with start_all.sh.
-"$SCRIPT_DIR/stop_local_kafka.sh"
+trap cleanup_started_kafka EXIT
+"$SCRIPT_DIR/../kafka/start_local_kafka.sh"
+cleanup_kafka=1
+
+if ! pto_wait_for_tcp 127.0.0.1 9092 40 1 "$PYTHON_BIN" "$PTO_PYCACHE_DIR"; then
+    pto_die "Kafka did not become reachable on 127.0.0.1:9092 during environment verification"
+fi
+
+# Stop Kafka after verification so the stack can later be started cleanly with runtime/start_all.sh.
+"$SCRIPT_DIR/../kafka/stop_local_kafka.sh"
+cleanup_kafka=0
+trap - EXIT
 
 echo "Environment installation completed."
-echo "Use ./scripts/start_all.sh to launch the platform."
+echo "Use ./scripts/runtime/start_all.sh to launch the platform."
 printf '\n\033[1;33m============================================================\033[0m\n'
 printf '\033[1;32mNEXT STEP: activate the project conda environment\033[0m\n\n'
 printf '    \033[1;36mconda activate %s\033[0m\n' "$CONDA_ENV_NAME"
