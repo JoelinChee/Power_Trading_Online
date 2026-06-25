@@ -3,15 +3,18 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ARTIFACTS_ROOT="$REPO_ROOT/generated"
+source "$SCRIPT_DIR/../common.sh"
+
+REPO_ROOT="$PTO_REPO_ROOT"
+ARTIFACTS_ROOT="$PTO_ARTIFACTS_ROOT"
 RELEASE_DIR="$ARTIFACTS_ROOT/releases"
-PYCACHE_DIR="$ARTIFACTS_ROOT/pycache"
 VERSION_FILE="$REPO_ROOT/VERSION"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 KAFKA_RUNTIME_DIR="$ARTIFACTS_ROOT/kafka-local/kafka_2.13-3.7.1"
+KAFKA_PID_FILE="$ARTIFACTS_ROOT/kafka-local/kafka.pid"
 
-mkdir -p "$RELEASE_DIR" "$PYCACHE_DIR"
+pto_prepare_runtime_dirs
+mkdir -p "$RELEASE_DIR"
 
 if [[ ! -f "$VERSION_FILE" ]]; then
     echo "VERSION file not found at $VERSION_FILE" >&2
@@ -25,16 +28,32 @@ if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 if ! "$PYTHON_BIN" -m pip show pyinstaller >/dev/null 2>&1; then
-    PYTHONPYCACHEPREFIX="$PYCACHE_DIR" "$PYTHON_BIN" -m pip install pyinstaller
+    PYTHONPYCACHEPREFIX="$PTO_PYCACHE_DIR" "$PYTHON_BIN" -m pip install pyinstaller
 fi
 
-# Build-time protobuf generation for binary bundling.
-PYTHONPYCACHEPREFIX="$PYCACHE_DIR" bash "$SCRIPT_DIR/compile_protos.sh"
+# Build-time protobuf generation for binary bundling. Pass the selected
+# interpreter through so generated modules match the packaging environment.
+PYTHON_BIN="$PYTHON_BIN" bash "$SCRIPT_DIR/../proto/compile_protos.sh"
 
-# Ensure Kafka runtime dependencies are available locally before packaging.
+# Ensure Kafka runtime dependencies are available locally before packaging. If a
+# broker was already running before packaging, leave it running; otherwise stop
+# the temporary broker after the runtime has been downloaded and verified.
 if [[ ! -d "$KAFKA_RUNTIME_DIR" ]]; then
-    bash "$SCRIPT_DIR/start_local_kafka.sh"
-    bash "$SCRIPT_DIR/stop_local_kafka.sh"
+    kafka_was_running=0
+    if [[ -f "$KAFKA_PID_FILE" ]] && kill -0 "$(cat "$KAFKA_PID_FILE")" 2>/dev/null; then
+        kafka_was_running=1
+    fi
+
+    cleanup_packaging_kafka() {
+        if [[ "$kafka_was_running" -eq 0 ]]; then
+            bash "$SCRIPT_DIR/../kafka/stop_local_kafka.sh" >/dev/null 2>&1 || true
+        fi
+    }
+
+    trap cleanup_packaging_kafka EXIT
+    bash "$SCRIPT_DIR/../kafka/start_local_kafka.sh"
+    cleanup_packaging_kafka
+    trap - EXIT
 fi
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
@@ -90,7 +109,7 @@ if __name__ == "__main__":
     raise SystemExit(main())
 PY
 
-PYTHONPYCACHEPREFIX="$PYCACHE_DIR" env PYTHONPATH="$ARTIFACTS_ROOT:$REPO_ROOT:${PYTHONPATH:-}" \
+PYTHONPYCACHEPREFIX="$PTO_PYCACHE_DIR" env PYTHONPATH="$ARTIFACTS_ROOT:$REPO_ROOT:${PYTHONPATH:-}" \
     "$PYTHON_BIN" -m PyInstaller \
     --noconfirm \
     --clean \
@@ -237,20 +256,62 @@ RUN_DIR="$REPO_ROOT/run"
 PID_DIR="$RUN_DIR/pids"
 LOG_DIR="$RUN_DIR/logs"
 BOOT_BIN="$REPO_ROOT/bin/power_trading_boot"
+START_KAFKA=0
+START_DATA_BOOT=0
+START_FORECAST_BOOT=0
+START_EXECUTION_BOOT=0
+
+usage() {
+    echo "Usage: $0 [all|kafka|data|forecast|execution|data_boot|forecast_boot|execution_boot]..."
+}
+
+select_all_targets() {
+    # Expand `all` into explicit flags so startup order remains deterministic
+    # even when the user passes targets in a different order.
+    START_KAFKA=1
+    START_DATA_BOOT=1
+    START_FORECAST_BOOT=1
+    START_EXECUTION_BOOT=1
+}
+
+if [[ "$#" -eq 0 ]]; then
+    select_all_targets
+fi
+
+for target in "$@"; do
+    case "$target" in
+        all)
+            select_all_targets
+            ;;
+        kafka)
+            START_KAFKA=1
+            ;;
+        data|data_boot)
+            START_DATA_BOOT=1
+            ;;
+        forecast|forecast_boot)
+            START_FORECAST_BOOT=1
+            ;;
+        execution|execution_boot)
+            START_EXECUTION_BOOT=1
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            usage >&2
+            exit 1
+            ;;
+    esac
+done
 
 mkdir -p "$PID_DIR" "$LOG_DIR"
 export POWER_TRADING_HOME="$REPO_ROOT"
 
-bash "$SCRIPT_DIR/start_local_kafka.sh"
-
-for _ in {1..40}; do
-    if (echo > /dev/tcp/127.0.0.1/9092) >/dev/null 2>&1; then
-        break
-    fi
-    sleep 1
-done
-
 start_service() {
+    # The packaged binary owns the Python application code. PID and log files
+    # still live outside bin/ so operators can inspect and clean runtime state.
     local name="$1"
     local service="$2"
     local port="$3"
@@ -267,11 +328,27 @@ start_service() {
     echo "Started $name on port $port with PID $(cat "$pid_file")"
 }
 
-start_service "data_boot" "data" "${DATA_BOOT_PORT:-8001}"
-start_service "forecast_boot" "forecast" "${FORECAST_BOOT_PORT:-8002}"
-start_service "execution_boot" "execution" "${EXECUTION_BOOT_PORT:-8003}"
+if [[ "$START_KAFKA" -eq 1 ]]; then
+    bash "$SCRIPT_DIR/start_local_kafka.sh"
+fi
 
-echo "All services started. Logs are under $LOG_DIR"
+# start_local_kafka.sh already blocks until the packaged broker is ready, so no
+# extra socket probe is needed here. That keeps the binary package independent
+# from a system Python runtime.
+
+if [[ "$START_DATA_BOOT" -eq 1 ]]; then
+    start_service "data_boot" "data" "${DATA_BOOT_PORT:-8001}"
+fi
+
+if [[ "$START_FORECAST_BOOT" -eq 1 ]]; then
+    start_service "forecast_boot" "forecast" "${FORECAST_BOOT_PORT:-8002}"
+fi
+
+if [[ "$START_EXECUTION_BOOT" -eq 1 ]]; then
+    start_service "execution_boot" "execution" "${EXECUTION_BOOT_PORT:-8003}"
+fi
+
+echo "Requested startup complete. Logs are under $LOG_DIR"
 SH
 
 cat >"$STAGING_ROOT/scripts/stop_all.sh" <<'SH'
@@ -282,6 +359,55 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PID_DIR="$REPO_ROOT/run/pids"
+STOP_KAFKA=0
+STOP_DATA_BOOT=0
+STOP_FORECAST_BOOT=0
+STOP_EXECUTION_BOOT=0
+
+usage() {
+    echo "Usage: $0 [all|kafka|data|forecast|execution|data_boot|forecast_boot|execution_boot]..."
+}
+
+select_all_targets() {
+    # Expand `all` into explicit flags so shutdown order remains deterministic
+    # and mirrors service dependencies in reverse.
+    STOP_KAFKA=1
+    STOP_DATA_BOOT=1
+    STOP_FORECAST_BOOT=1
+    STOP_EXECUTION_BOOT=1
+}
+
+if [[ "$#" -eq 0 ]]; then
+    select_all_targets
+fi
+
+for target in "$@"; do
+    case "$target" in
+        all)
+            select_all_targets
+            ;;
+        kafka)
+            STOP_KAFKA=1
+            ;;
+        data|data_boot)
+            STOP_DATA_BOOT=1
+            ;;
+        forecast|forecast_boot)
+            STOP_FORECAST_BOOT=1
+            ;;
+        execution|execution_boot)
+            STOP_EXECUTION_BOOT=1
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            usage >&2
+            exit 1
+            ;;
+    esac
+done
 
 stop_service() {
     local name="$1"
@@ -314,19 +440,52 @@ stop_service() {
     rm -f "$pid_file"
 }
 
-stop_service "execution_boot"
-stop_service "forecast_boot"
-stop_service "data_boot"
+stop_stale_service_processes() {
+    local services=()
+    local pattern
+    local stale_service_pids
 
-stale_service_pids="$(pgrep -f 'power_trading_boot --service (data|forecast|execution)' || true)"
-if [[ -n "$stale_service_pids" ]]; then
-    echo "Stopping stale service process(es): $stale_service_pids"
-    echo "$stale_service_pids" | xargs kill -9
+    if [[ "$STOP_DATA_BOOT" -eq 1 ]]; then
+        services+=(data)
+    fi
+    if [[ "$STOP_FORECAST_BOOT" -eq 1 ]]; then
+        services+=(forecast)
+    fi
+    if [[ "$STOP_EXECUTION_BOOT" -eq 1 ]]; then
+        services+=(execution)
+    fi
+
+    if [[ "${#services[@]}" -eq 0 ]]; then
+        return 0
+    fi
+
+    pattern="$(IFS='|'; echo "${services[*]}")"
+    stale_service_pids="$(pgrep -f "power_trading_boot --service (${pattern})" || true)"
+    if [[ -n "$stale_service_pids" ]]; then
+        echo "Stopping stale service process(es): $stale_service_pids"
+        echo "$stale_service_pids" | xargs kill -9
+    fi
+}
+
+if [[ "$STOP_EXECUTION_BOOT" -eq 1 ]]; then
+    stop_service "execution_boot"
 fi
 
-bash "$SCRIPT_DIR/stop_local_kafka.sh"
+if [[ "$STOP_FORECAST_BOOT" -eq 1 ]]; then
+    stop_service "forecast_boot"
+fi
 
-echo "All services stopped"
+if [[ "$STOP_DATA_BOOT" -eq 1 ]]; then
+    stop_service "data_boot"
+fi
+
+stop_stale_service_processes
+
+if [[ "$STOP_KAFKA" -eq 1 ]]; then
+    bash "$SCRIPT_DIR/stop_local_kafka.sh"
+fi
+
+echo "Requested shutdown complete"
 SH
 
 chmod +x "$STAGING_ROOT/bin/power_trading_boot" "$STAGING_ROOT/scripts/"*.sh

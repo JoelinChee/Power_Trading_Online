@@ -3,14 +3,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ARTIFACTS_ROOT="$REPO_ROOT/generated"
+source "$SCRIPT_DIR/../common.sh"
+
+ARTIFACTS_ROOT="$PTO_ARTIFACTS_ROOT"
 RELEASE_DIR="$ARTIFACTS_ROOT/releases"
 
 usage() {
     cat <<'EOF'
 Usage:
-  scripts/test_release_package.sh [archive_path]
+    scripts/release/test_release_package.sh [archive_path]
 
 If archive_path is not provided, the script picks the newest
 power_trading_online-*.tar.gz package under generated/releases.
@@ -31,7 +32,7 @@ else
 fi
 
 if [[ -z "${ARCHIVE_PATH:-}" || ! -f "$ARCHIVE_PATH" ]]; then
-    echo "Release archive not found. Build one first with scripts/package_release.sh" >&2
+    echo "Release archive not found. Build one first with scripts/release/package_release.sh" >&2
     exit 1
 fi
 
@@ -98,6 +99,9 @@ fi
 pushd "$PACKAGE_ROOT" >/dev/null
 
 cleanup() {
+    # Always try to stop the extracted package, even when a health check fails.
+    # This keeps failed release tests from leaving brokers or service binaries
+    # behind on their test ports.
     bash scripts/stop_all.sh >/dev/null 2>&1 || true
 }
 
