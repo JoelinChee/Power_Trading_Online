@@ -85,10 +85,6 @@ def _record_timestamp(header: dict[str, Any]) -> int | None:
 
 
 def _format_seconds(seconds: float) -> str:
-    if seconds >= 3600:
-        return f"{seconds / 3600:.2f}h"
-    if seconds >= 60:
-        return f"{seconds / 60:.2f}m"
     return f"{seconds:.1f}s"
 
 
@@ -116,6 +112,35 @@ def _print_progress(
     print(line, end=end, file=sys.stderr, flush=True)
 
 
+def _sleep_with_progress(
+    *,
+    duration_seconds: float,
+    elapsed_recording_seconds: float,
+    total_recording_seconds: float,
+    sent: int,
+    total: int,
+    topic: str,
+) -> None:
+    if duration_seconds <= 0:
+        return
+
+    sleep_start = time.monotonic()
+    sleep_end = sleep_start + duration_seconds
+    while True:
+        remaining_seconds = sleep_end - time.monotonic()
+        if remaining_seconds <= 0:
+            return
+        time.sleep(min(0.1, remaining_seconds))
+        progressed_seconds = min(duration_seconds, time.monotonic() - sleep_start)
+        _print_progress(
+            elapsed_recording_seconds=elapsed_recording_seconds + progressed_seconds,
+            total_recording_seconds=total_recording_seconds,
+            sent=sent,
+            total=total,
+            topic=topic,
+        )
+
+
 def main() -> int:
     args = _parse_args()
     input_path = Path(args.input).expanduser().resolve()
@@ -137,6 +162,7 @@ def main() -> int:
     producer = Producer({"bootstrap.servers": args.brokers, "client.id": "power-trading-kafka-play"})
     sent = 0
     previous_ts: int | None = None
+    previous_elapsed_recording_seconds = 0.0
 
     for header, key, value in records:
             source_topic = str(header.get("topic", ""))
@@ -146,15 +172,30 @@ def main() -> int:
 
             current_ts = _record_timestamp(header)
             if args.rate > 0:
-                time.sleep(1.0 / args.rate)
+                _sleep_with_progress(
+                    duration_seconds=1.0 / args.rate,
+                    elapsed_recording_seconds=previous_elapsed_recording_seconds,
+                    total_recording_seconds=total_recording_seconds,
+                    sent=sent,
+                    total=total,
+                    topic=topic,
+                )
             elif not args.full_speed and previous_ts is not None and current_ts is not None and current_ts >= previous_ts:
-                time.sleep((current_ts - previous_ts) / 1000.0)
+                _sleep_with_progress(
+                    duration_seconds=(current_ts - previous_ts) / 1000.0,
+                    elapsed_recording_seconds=previous_elapsed_recording_seconds,
+                    total_recording_seconds=total_recording_seconds,
+                    sent=sent,
+                    total=total,
+                    topic=topic,
+                )
 
             producer.produce(topic=topic, key=key, value=value, headers=_decode_headers(header.get("headers", [])))
             producer.poll(0)
             sent += 1
             previous_ts = current_ts
             elapsed_recording_seconds = ((current_ts - first_ts) / 1000.0) if first_ts is not None and current_ts is not None else 0.0
+            previous_elapsed_recording_seconds = elapsed_recording_seconds
             _print_progress(
                 elapsed_recording_seconds=elapsed_recording_seconds,
                 total_recording_seconds=total_recording_seconds,

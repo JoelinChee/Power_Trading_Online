@@ -12,6 +12,53 @@ LOG_DIR="$ARTIFACTS_ROOT/logs"
 PYCACHE_DIR="$ARTIFACTS_ROOT/pycache"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 PYTHONPATH_PREFIX="$ARTIFACTS_ROOT:$REPO_ROOT"
+START_KAFKA=0
+START_DATA_BOOT=0
+START_FORECAST_BOOT=0
+START_EXECUTION_BOOT=0
+
+usage() {
+    echo "Usage: $0 [all|kafka|data|forecast|execution|data_boot|forecast_boot|execution_boot]..."
+}
+
+select_all_targets() {
+    START_KAFKA=1
+    START_DATA_BOOT=1
+    START_FORECAST_BOOT=1
+    START_EXECUTION_BOOT=1
+}
+
+if [[ "$#" -eq 0 ]]; then
+    select_all_targets
+fi
+
+for target in "$@"; do
+    case "$target" in
+        all)
+            select_all_targets
+            ;;
+        kafka)
+            START_KAFKA=1
+            ;;
+        data|data_boot)
+            START_DATA_BOOT=1
+            ;;
+        forecast|forecast_boot)
+            START_FORECAST_BOOT=1
+            ;;
+        execution|execution_boot)
+            START_EXECUTION_BOOT=1
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            usage >&2
+            exit 1
+            ;;
+    esac
+done
 
 # Ensure the external artifact directories exist before starting any process.
 mkdir -p "$PID_DIR" "$LOG_DIR" "$PYCACHE_DIR"
@@ -21,15 +68,10 @@ if [[ ! -f "$REPO_ROOT/.env" ]]; then
     cp "$REPO_ROOT/.env.example" "$REPO_ROOT/.env"
 fi
 
-# Compile protobuf definitions first so every service can import the generated module.
-bash "$SCRIPT_DIR/compile_protos.sh"
-
-# Start the local Kafka broker used by the three boot services.
-bash "$SCRIPT_DIR/start_local_kafka.sh"
-
-# Wait until the Kafka broker socket is reachable before starting any service.
-for _ in {1..40}; do
-    if PYTHONPYCACHEPREFIX="$PYCACHE_DIR" "$PYTHON_BIN" - <<'PY'
+wait_for_kafka() {
+    # Wait until the Kafka broker socket is reachable before starting any service.
+    for _ in {1..40}; do
+        if PYTHONPYCACHEPREFIX="$PYCACHE_DIR" "$PYTHON_BIN" - <<'PY'
 import socket
 sock = socket.socket()
 sock.settimeout(1)
@@ -41,11 +83,15 @@ except OSError:
 finally:
     sock.close()
 PY
-    then
-        break
-    fi
-    sleep 1
-done
+        then
+            return 0
+        fi
+        sleep 1
+    done
+
+    echo "Kafka did not become reachable on 127.0.0.1:9092" >&2
+    return 1
+}
 
 start_service() {
     # Start one Uvicorn process and track both its PID and log file externally.
@@ -74,9 +120,30 @@ start_service() {
 
 cd "$REPO_ROOT"
 
-# Start the three business services in dependency order.
-start_service "data_boot" "boots.data_boot.main:app" "${DATA_BOOT_PORT:-8001}"
-start_service "forecast_boot" "boots.forecast_boot.main:app" "${FORECAST_BOOT_PORT:-8002}"
-start_service "execution_boot" "boots.execution_boot.main:app" "${EXECUTION_BOOT_PORT:-8003}"
+# Compile protobuf definitions first so every service can import the generated module.
+if [[ "$START_DATA_BOOT" -eq 1 || "$START_FORECAST_BOOT" -eq 1 || "$START_EXECUTION_BOOT" -eq 1 ]]; then
+    bash "$SCRIPT_DIR/compile_protos.sh"
+fi
 
-echo "All services started. Logs are under $LOG_DIR"
+if [[ "$START_KAFKA" -eq 1 ]]; then
+    bash "$SCRIPT_DIR/start_local_kafka.sh"
+fi
+
+if [[ "$START_KAFKA" -eq 1 && ( "$START_DATA_BOOT" -eq 1 || "$START_FORECAST_BOOT" -eq 1 || "$START_EXECUTION_BOOT" -eq 1 ) ]]; then
+    wait_for_kafka
+fi
+
+if [[ "$START_DATA_BOOT" -eq 1 ]]; then
+    start_service "data_boot" "boots.data_boot.main:app" "${DATA_BOOT_PORT:-8001}"
+fi
+
+if [[ "$START_FORECAST_BOOT" -eq 1 ]]; then
+    start_service "forecast_boot" "boots.forecast_boot.main:app" "${FORECAST_BOOT_PORT:-8002}"
+fi
+
+if [[ "$START_EXECUTION_BOOT" -eq 1 ]]; then
+    start_service "execution_boot" "boots.execution_boot.main:app" "${EXECUTION_BOOT_PORT:-8003}"
+fi
+
+echo "Requested startup complete. Logs are under $LOG_DIR"
+
