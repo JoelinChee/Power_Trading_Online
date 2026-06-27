@@ -1,0 +1,38 @@
+name: Unit Test
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java for local Kafka
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: "3.12"
+          activate-environment: power_trading_online
+
+      - name: Install project environment
+        shell: bash -el {0}
+        run: |
+          ./scripts/setup/install_environment.sh
+
+      - name: Run unit test suite
+        shell: bash -el {0}
+        run: |
+          conda activate power_trading_online
+          python unit_test/run_all_unit_tests.py
