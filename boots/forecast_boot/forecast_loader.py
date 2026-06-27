@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-import os
 from typing import Any
 
 from infrastructure.loaders.loader_base import BaseConfigReader
@@ -10,19 +8,15 @@ from infrastructure.loaders.loader_base import BaseConfigReader
 class ForecastAlgoConfigLoader(BaseConfigReader):
 	"""Loader for forecast_boot algorithm parameters."""
 
-	_default_config_path = Path(__file__).resolve().parents[2] / "config" / "forecast_boot" / "config.yaml"
+	_default_config_path = BaseConfigReader.runtime_config_path("config", "forecast_boot", "config.yaml")
 
 	@classmethod
-	def _config_path(cls) -> Path:
-		runtime_root = os.getenv("POWER_TRADING_HOME")
-		if runtime_root:
-			return Path(runtime_root).resolve() / "config" / "forecast_boot" / "config.yaml"
-		return cls._default_config_path
+	def _config_path(cls):
+		return cls.runtime_config_path("config", "forecast_boot", "config.yaml")
 
 	@classmethod
 	def get_algo_config(cls) -> dict[str, Any]:
-		loaded = cls.load_config_dict(cls._config_path())
-		algo_config = loaded.get("algo") if isinstance(loaded.get("algo"), dict) else {}
+		algo_config = cls.load_config_section(cls._config_path(), "algo")
 		return {
 			"slots_per_day": int(algo_config.get("slots_per_day", 96)),
 			"default_weather_type": str(algo_config.get("default_weather_type", "unknown")),

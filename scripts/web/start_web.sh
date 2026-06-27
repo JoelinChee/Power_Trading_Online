@@ -40,6 +40,22 @@ echo "URL: $WEB_URL"
 
 open_browser() {
     local url="$1"
+    local browser_commands=(
+        firefox
+        google-chrome
+        chrome
+        chromium
+        chromium-browser
+        microsoft-edge
+        brave-browser
+    )
+
+    for browser_command in "${browser_commands[@]}"; do
+        if command -v "$browser_command" >/dev/null 2>&1; then
+            nohup "$browser_command" "$url" >/dev/null 2>&1 &
+            return 0
+        fi
+    done
 
     # Try common Linux, GNOME, WSL/Windows routes in order. Browser launch is a
     # convenience only; failing to open one must not fail the web service start.

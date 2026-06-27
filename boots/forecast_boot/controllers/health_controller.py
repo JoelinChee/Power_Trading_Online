@@ -2,14 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from boots.common.health import create_health_router
 
 
-router = APIRouter(tags=["health"])
-
-
-@router.get("/health")
-def health() -> dict:
-    """Return a minimal liveness payload for orchestration and tests."""
-
-    return {"status": "UP", "service": "forecast_boot"}
+router = create_health_router("forecast_boot")

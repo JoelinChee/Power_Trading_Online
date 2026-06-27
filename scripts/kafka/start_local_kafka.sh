@@ -23,6 +23,7 @@ CLUSTER_ID_FILE="$RUNTIME_DIR/cluster.id"
 CONFIG_FILE="$RUNTIME_DIR/server-low-memory.properties"
 LOG_DIR="$RUNTIME_DIR/kraft-logs"
 SERVER_LOG="$RUNTIME_DIR/server.out"
+DOWNLOAD_LOG="$RUNTIME_DIR/kafka-download.log"
 BOOTSTRAP_SERVER="127.0.0.1:9092"
 
 wait_for_kafka_ready() {
@@ -78,15 +79,27 @@ if [[ ! -d "$KAFKA_DIR" ]]; then
         for url in "${MIRROR_URLS[@]}"; do
             echo "正在尝试下载 Kafka: $url"
             if command -v aria2c &>/dev/null; then
-                aria2c -x 8 -s 8 -k 1M -d "$RUNTIME_DIR" -o "$ARCHIVE_NAME" "$url" && downloaded=true && break
+                if aria2c -x 8 -s 8 -k 1M -d "$RUNTIME_DIR" -o "$ARCHIVE_NAME" "$url" >"$DOWNLOAD_LOG" 2>&1; then
+                    downloaded=true
+                    rm -f "$DOWNLOAD_LOG"
+                    break
+                fi
             else
-                wget --show-progress -O "$ARCHIVE_PATH" "$url" && downloaded=true && break
+                if wget --show-progress -O "$ARCHIVE_PATH" "$url" >"$DOWNLOAD_LOG" 2>&1; then
+                    downloaded=true
+                    rm -f "$DOWNLOAD_LOG"
+                    break
+                fi
             fi
             echo "下载失败，尝试下一个镜像..."
             rm -f "$ARCHIVE_PATH"
         done
         if [[ "$downloaded" != "true" ]]; then
             echo "所有镜像下载均失败" >&2
+            if [[ -f "$DOWNLOAD_LOG" ]]; then
+                echo "最近一次下载日志:" >&2
+                tail -n 40 "$DOWNLOAD_LOG" >&2
+            fi
             exit 1
         fi
     fi

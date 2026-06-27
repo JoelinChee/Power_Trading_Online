@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from typing import Any
 
 from infrastructure.loaders.loader_base import BaseConfigReader
@@ -10,19 +8,15 @@ from infrastructure.loaders.loader_base import BaseConfigReader
 class BootsConfigLoader(BaseConfigReader):
     """Loader for boot runtime settings from boots_config.yaml."""
 
-    _default_config_path = Path(__file__).resolve().parents[2] / "config" / "common" / "boots_config.yaml"
+    _default_config_path = BaseConfigReader.runtime_config_path("config", "common", "boots_config.yaml")
 
     @classmethod
-    def _config_path(cls) -> Path:
-        runtime_root = os.getenv("POWER_TRADING_HOME")
-        if runtime_root:
-            return Path(runtime_root).resolve() / "config" / "common" / "boots_config.yaml"
-        return cls._default_config_path
+    def _config_path(cls):
+        return cls.runtime_config_path("config", "common", "boots_config.yaml")
 
     @classmethod
     def _load_root(cls) -> dict[str, Any]:
-        loaded = cls.load_config_dict(cls._config_path())
-        return loaded.get("boots", {}) if isinstance(loaded.get("boots", {}), dict) else {}
+        return cls.load_config_section(cls._config_path(), "boots")
 
     @classmethod
     def get_boot(cls, boot_name: str) -> dict[str, Any]:

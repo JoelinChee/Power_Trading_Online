@@ -84,6 +84,112 @@ class KafkaPublisher:
         self._producer.flush(2.0)
 
 
+class KafkaBatchConsumer:
+    """Lazy Kafka consumer that drains currently available binary payloads.
+
+    Timer-driven services can use this class when they want polling to happen
+    on a scheduler tick instead of in a dedicated background thread.
+    """
+
+    def __init__(
+        self,
+        settings: KafkaSettingsProtocol,
+        topic_name: str,
+        group_suffix: str,
+        poll_timeout_seconds: float = 0.1,
+    ) -> None:
+        self.settings = settings
+        self.topic_name = topic_name
+        self.group_suffix = group_suffix
+        self.poll_timeout_seconds = poll_timeout_seconds
+        self._consumer: Optional[Any] = None
+
+    def drain_available(self) -> list[bytes]:
+        """Poll until Kafka has no immediately available payloads."""
+        consumer = self._get_or_create_consumer()
+        if consumer is None:
+            return []
+
+        payloads: list[bytes] = []
+        while True:
+            message = consumer.poll(self.poll_timeout_seconds)
+            if message is None:
+                break
+            if message.error():
+                if self._should_ignore_poll_error(message.error()):
+                    break
+                self._log_poll_error(message.error())
+                break
+
+            payload = message.value()
+            if payload:
+                payloads.append(payload)
+        return payloads
+
+    def close(self) -> None:
+        """Close the underlying consumer if it has been created."""
+        if self._consumer is not None:
+            self._consumer.close()
+            self._consumer = None
+
+    def _get_or_create_consumer(self) -> Optional[Any]:
+        """Create one Kafka consumer lazily and reuse it across scheduler ticks."""
+        if not self.settings.kafka_enabled:
+            logger.info("Kafka consumer disabled for service=%s", self.settings.service_name)
+            return None
+
+        if Consumer is None:
+            logger.warning("confluent-kafka is not installed; consumer will not start")
+            return None
+
+        if self._consumer is not None:
+            return self._consumer
+
+        self._consumer = Consumer(
+            {
+                "bootstrap.servers": self.settings.kafka_bootstrap_servers,
+                "group.id": self.settings.consumer_group(self.group_suffix),
+                "client.id": f"{self.settings.kafka_client_id}-{self.settings.service_name}",
+                "auto.offset.reset": self.settings.kafka_auto_offset_reset,
+            }
+        )
+        self._consumer.subscribe([self.topic_name])
+        logger.info(
+            "Kafka batch consumer subscribed service=%s group=%s topic=%s",
+            self.settings.service_name,
+            self.settings.consumer_group(self.group_suffix),
+            self.topic_name,
+        )
+        return self._consumer
+
+    def _should_ignore_poll_error(self, error: Any) -> bool:
+        """Return whether a Kafka poll error represents an idle/retryable state."""
+        if KafkaError is None:
+            return False
+
+        error_code = error.code()
+        if error_code == KafkaError._PARTITION_EOF:
+            return True
+        if error_code == KafkaError.UNKNOWN_TOPIC_OR_PART:
+            logger.info(
+                "Kafka topic=%s is not available yet for service=%s; waiting for topic auto-creation",
+                self.topic_name,
+                self.settings.service_name,
+            )
+            return True
+        return False
+
+    def _log_poll_error(self, error: Any) -> None:
+        """Log non-retryable poll errors with service and topic context."""
+        logger.warning(
+            "Kafka poll returned error service=%s group=%s topic=%s error=%s",
+            self.settings.service_name,
+            self.settings.consumer_group(self.group_suffix),
+            self.topic_name,
+            error,
+        )
+
+
 class KafkaConsumerWorker:
     """Background Kafka consumer that dispatches binary payloads to a handler.
 

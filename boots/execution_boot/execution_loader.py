@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-import os
 from typing import Any
 
 from infrastructure.loaders.loader_base import BaseConfigReader
@@ -10,19 +8,15 @@ from infrastructure.loaders.loader_base import BaseConfigReader
 class ExecutionAlgoConfigLoader(BaseConfigReader):
 	"""Loader for execution_boot algorithm parameters."""
 
-	_default_config_path = Path(__file__).resolve().parents[2] / "config" / "execution_boot" / "config.yaml"
+	_default_config_path = BaseConfigReader.runtime_config_path("config", "execution_boot", "config.yaml")
 
 	@classmethod
-	def _config_path(cls) -> Path:
-		runtime_root = os.getenv("POWER_TRADING_HOME")
-		if runtime_root:
-			return Path(runtime_root).resolve() / "config" / "execution_boot" / "config.yaml"
-		return cls._default_config_path
+	def _config_path(cls):
+		return cls.runtime_config_path("config", "execution_boot", "config.yaml")
 
 	@classmethod
 	def get_algo_config(cls) -> dict[str, Any]:
-		loaded = cls.load_config_dict(cls._config_path())
-		algo_config = loaded.get("algo") if isinstance(loaded.get("algo"), dict) else {}
+		algo_config = cls.load_config_section(cls._config_path(), "algo")
 		return {
 			"expected_cost_risk_weight": float(algo_config.get("expected_cost_risk_weight", 45.0)),
 			"renewable_coverage_risk_weight": float(algo_config.get("renewable_coverage_risk_weight", 30.0)),

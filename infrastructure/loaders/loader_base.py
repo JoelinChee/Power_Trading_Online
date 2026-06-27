@@ -7,6 +7,7 @@ third-party YAML/logging helpers so it can run in a clean repository checkout.
 from __future__ import annotations
 
 from ast import literal_eval
+import os
 from pathlib import Path
 from typing import Any, Optional, Union
 import json
@@ -45,6 +46,19 @@ class BaseConfigReader:
         raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}")
 
     @classmethod
+    def runtime_config_path(cls, *path_parts: str) -> Path:
+        """Resolve a config file path in source or packaged runtime mode.
+
+        This path strategy keeps release-mode `POWER_TRADING_HOME` behavior in
+        one place instead of repeating it across every concrete loader.
+        """
+
+        runtime_root = os.getenv("POWER_TRADING_HOME")
+        if runtime_root:
+            return Path(runtime_root).resolve().joinpath(*path_parts)
+        return Path(__file__).resolve().parents[2].joinpath(*path_parts)
+
+    @classmethod
     def load_config_dict(cls, config_path: Optional[Union[Path, str]]) -> dict[str, Any]:
         """Load a config file into a plain dictionary without applying mappings."""
 
@@ -56,6 +70,23 @@ class BaseConfigReader:
         if not isinstance(loaded, dict):
             raise ValueError(f"Config file format invalid: root must be dict ({resolved_path})")
         return loaded
+
+    @classmethod
+    def load_config_section(cls, config_path: Optional[Union[Path, str]], section_name: str) -> dict[str, Any]:
+        """Load one dictionary section from a config file."""
+
+        loaded = cls.load_config_dict(config_path)
+        section = loaded.get(section_name)
+        return dict(section) if isinstance(section, dict) else {}
+
+    @classmethod
+    def required_config_section(cls, config_path: Optional[Union[Path, str]], section_name: str) -> dict[str, Any]:
+        """Load a mandatory dictionary section or raise a clear KeyError."""
+
+        section = cls.load_config_section(config_path, section_name)
+        if not section:
+            raise KeyError(f"Config section not configured: {section_name}")
+        return section
 
     @classmethod
     def merge_config_sections(cls, base_config: dict[str, Any], section_config: dict[str, Any]) -> dict[str, Any]:

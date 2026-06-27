@@ -1,33 +1,11 @@
 """FastAPI application entry point for the execution boot service."""
 
-from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 
+from boots.common.app_factory import BootApplicationFactory, BootApplicationSpec
 from boots.execution_boot.controllers.execution_controller import router as execution_router
 from boots.execution_boot.controllers.health_controller import router as health_router
 from boots.execution_boot.services.execution_service import get_execution_service
-from infrastructure.logging.logging import configure_logging
-
-
-# Configure process logging from centralized module.
-configure_logging()
-
-
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    """Start and stop background Kafka workers with the application lifecycle.
-
-    Args:
-        _: FastAPI application instance supplied by FastAPI's lifespan hook.
-    """
-
-    service = get_execution_service()
-    service.start_pipeline()
-    try:
-        yield
-    finally:
-        service.stop_pipeline()
 
 
 def create_app() -> FastAPI:
@@ -37,10 +15,14 @@ def create_app() -> FastAPI:
         Configured FastAPI application instance.
     """
 
-    app = FastAPI(title="Execution Boot", version="0.1.0", lifespan=lifespan)
-    app.include_router(health_router)
-    app.include_router(execution_router)
-    return app
+    return BootApplicationFactory(
+        BootApplicationSpec(
+            title="Execution Boot",
+            version="0.1.0",
+            service_factory=get_execution_service,
+            routers=(health_router, execution_router),
+        )
+    ).create()
 
 
 # Exported ASGI application instance used by uvicorn.
