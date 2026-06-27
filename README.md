@@ -896,9 +896,9 @@ name: Unit Test
 on:
   pull_request:
   push:
-		branches:
-			- main
-			- master
+    branches:
+      - main
+      - master
 
 jobs:
   test:

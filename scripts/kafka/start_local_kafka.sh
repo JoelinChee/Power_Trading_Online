@@ -47,6 +47,31 @@ wait_for_kafka_ready() {
     return 1
 }
 
+print_kafka_log_tail() {
+    if [[ -f "$SERVER_LOG" ]]; then
+        echo "---- Kafka server log tail: $SERVER_LOG ----" >&2
+        tail -n 80 "$SERVER_LOG" >&2
+        echo "---- end Kafka server log tail ----" >&2
+    fi
+}
+
+start_kafka_process() {
+    # Start Kafka with a bounded heap that has been verified to pass the project smoke test.
+    KAFKA_HEAP_OPTS='-Xms128M -Xmx256M' nohup "$KAFKA_DIR/bin/kafka-server-start.sh" "$CONFIG_FILE" > "$SERVER_LOG" 2>&1 &
+    echo $! > "$PID_FILE"
+    echo "Started local Kafka with PID $(cat "$PID_FILE")"
+}
+
+reset_kafka_runtime_state() {
+    if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+        kill -9 "$(cat "$PID_FILE")" 2>/dev/null || true
+    fi
+    rm -f "$PID_FILE"
+    rm -rf "$LOG_DIR"
+    mkdir -p "$LOG_DIR"
+    "$KAFKA_DIR/bin/kafka-storage.sh" format -t "$(cat "$CLUSTER_ID_FILE")" -c "$CONFIG_FILE"
+}
+
 pto_prepare_runtime_dirs
 
 # Keep Kafka downloads, logs, PID files, and KRaft metadata under generated/ so
@@ -149,8 +174,15 @@ if [[ ! -f "$LOG_DIR/meta.properties" ]]; then
     "$KAFKA_DIR/bin/kafka-storage.sh" format -t "$(cat "$CLUSTER_ID_FILE")" -c "$CONFIG_FILE"
 fi
 
-# Start Kafka with a bounded heap that has been verified to pass the project smoke test.
-KAFKA_HEAP_OPTS='-Xms128M -Xmx256M' nohup "$KAFKA_DIR/bin/kafka-server-start.sh" "$CONFIG_FILE" > "$SERVER_LOG" 2>&1 &
-echo $! > "$PID_FILE"
-echo "Started local Kafka with PID $(cat "$PID_FILE")"
-wait_for_kafka_ready
+start_kafka_process
+if ! wait_for_kafka_ready; then
+    print_kafka_log_tail
+    if [[ "${PTO_RESET_KAFKA_ON_START_FAILURE:-0}" == "1" ]]; then
+        echo "Resetting local Kafka runtime state and retrying startup" >&2
+        reset_kafka_runtime_state
+        start_kafka_process
+        wait_for_kafka_ready || { print_kafka_log_tail; exit 1; }
+    else
+        exit 1
+    fi
+fi

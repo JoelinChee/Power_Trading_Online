@@ -11,6 +11,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      PTO_RESET_KAFKA_ON_START_FAILURE: "1"
 
     steps:
       - name: Checkout repository
