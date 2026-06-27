@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,63 @@ LOCAL_HERO_IMAGE = Path(__file__).resolve().parent / "assets" / "neon_power_grid
 LOCAL_CREW_IMAGE = Path(__file__).resolve().parent / "assets" / "pirate_war_original.svg"
 
 
+@dataclass(frozen=True)
+class HttpEndpoint:
+    """Named HTTP endpoint monitored by the dashboard."""
+
+    service_name: str
+    url: str
+
+
+class HttpSnapshotClient:
+    """Small adapter that normalizes dashboard HTTP calls.
+
+    Streamlit rendering code should not need to know how JSON parsing and HTTP
+    failures are represented; this class keeps that policy in one place.
+    """
+
+    def __init__(self, timeout_seconds: float) -> None:
+        self.timeout_seconds = timeout_seconds
+
+    def get(self, endpoint: HttpEndpoint) -> dict[str, Any]:
+        """Fetch one endpoint and return a stable dashboard payload."""
+        now_text = datetime.now().strftime("%H:%M:%S")
+        try:
+            response = httpx.get(endpoint.url, timeout=self.timeout_seconds)
+            return {
+                "ok": response.is_success,
+                "status_code": response.status_code,
+                "url": endpoint.url,
+                "time": now_text,
+                "payload": self._response_payload(response),
+                "error": "",
+            }
+        except httpx.HTTPError as exc:
+            return {
+                "ok": False,
+                "status_code": 503,
+                "url": endpoint.url,
+                "time": now_text,
+                "payload": {},
+                "error": str(exc),
+            }
+
+    def get_many(self, urls_by_service: dict[str, str]) -> dict[str, dict[str, Any]]:
+        """Fetch a service->URL map into a service->snapshot map."""
+        return {
+            service_name: self.get(HttpEndpoint(service_name=service_name, url=url))
+            for service_name, url in urls_by_service.items()
+        }
+
+    @staticmethod
+    def _response_payload(response: httpx.Response) -> Any:
+        """Return JSON when possible, otherwise keep response text visible."""
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
+
+
 def short_text(value: Any, max_len: int = 24) -> str:
     """Return compact text for dashboard cards."""
 
@@ -46,103 +104,22 @@ def short_text(value: Any, max_len: int = 24) -> str:
 def call_data_boot(source: str) -> dict[str, Any]:
     """Send one trigger request to data_boot and return normalized result."""
 
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    try:
-        response = httpx.get(DATA_BOOT_ROOT_URL, timeout=REQUEST_TIMEOUT_SECONDS)
-        try:
-            payload: Any = response.json()
-        except ValueError:
-            payload = response.text
-
-        return {
-            "ok": response.is_success,
-            "source": source,
-            "status_code": response.status_code,
-            "time": timestamp,
-            "payload": payload,
-            "error": "",
-        }
-    except httpx.HTTPError as exc:
-        return {
-            "ok": False,
-            "source": source,
-            "status_code": 503,
-            "time": timestamp,
-            "payload": {},
-            "error": str(exc),
-        }
+    client = HttpSnapshotClient(timeout_seconds=REQUEST_TIMEOUT_SECONDS)
+    result = client.get(HttpEndpoint(service_name="data_boot", url=DATA_BOOT_ROOT_URL))
+    result["source"] = source
+    return result
 
 
 def fetch_health_snapshot() -> dict[str, dict[str, Any]]:
     """Check health endpoints for all services and return normalized status map."""
 
-    snapshot: dict[str, dict[str, Any]] = {}
-    now_text = datetime.now().strftime("%H:%M:%S")
-
-    for service_name, health_url in SERVICE_HEALTH_URLS.items():
-        try:
-            response = httpx.get(health_url, timeout=HEALTH_TIMEOUT_SECONDS)
-            payload: dict[str, Any]
-            try:
-                payload = response.json()
-            except ValueError:
-                payload = {"raw": response.text}
-
-            snapshot[service_name] = {
-                "ok": response.is_success,
-                "status_code": response.status_code,
-                "url": health_url,
-                "time": now_text,
-                "payload": payload,
-                "error": "",
-            }
-        except httpx.HTTPError as exc:
-            snapshot[service_name] = {
-                "ok": False,
-                "status_code": 503,
-                "url": health_url,
-                "time": now_text,
-                "payload": {},
-                "error": str(exc),
-            }
-
-    return snapshot
+    return HttpSnapshotClient(timeout_seconds=HEALTH_TIMEOUT_SECONDS).get_many(SERVICE_HEALTH_URLS)
 
 
 def fetch_pipeline_snapshot() -> dict[str, dict[str, Any]]:
     """Fetch pipeline-status payloads from all boot services."""
 
-    snapshot: dict[str, dict[str, Any]] = {}
-    now_text = datetime.now().strftime("%H:%M:%S")
-
-    for service_name, pipeline_url in SERVICE_PIPELINE_URLS.items():
-        try:
-            response = httpx.get(pipeline_url, timeout=HEALTH_TIMEOUT_SECONDS)
-            payload: dict[str, Any]
-            try:
-                payload = response.json()
-            except ValueError:
-                payload = {"raw": response.text}
-
-            snapshot[service_name] = {
-                "ok": response.is_success,
-                "status_code": response.status_code,
-                "url": pipeline_url,
-                "time": now_text,
-                "payload": payload,
-                "error": "",
-            }
-        except httpx.HTTPError as exc:
-            snapshot[service_name] = {
-                "ok": False,
-                "status_code": 503,
-                "url": pipeline_url,
-                "time": now_text,
-                "payload": {},
-                "error": str(exc),
-            }
-
-    return snapshot
+    return HttpSnapshotClient(timeout_seconds=HEALTH_TIMEOUT_SECONDS).get_many(SERVICE_PIPELINE_URLS)
 
 
 def push_log(entry: dict[str, Any]) -> None:

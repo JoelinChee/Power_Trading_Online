@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-import os
 from typing import Any
 
 from infrastructure.loaders.loader_base import BaseConfigReader
@@ -30,22 +28,15 @@ class KafkaRuntimeSettings:
 class KafkaConfigLoader(BaseConfigReader):
     """Loader for Kafka shared settings from kafka_config.yaml."""
 
-    _default_config_path = Path(__file__).resolve().parents[2] / "config" / "common" / "kafka_config.yaml"
+    _default_config_path = BaseConfigReader.runtime_config_path("config", "common", "kafka_config.yaml")
 
     @classmethod
-    def _config_path(cls) -> Path:
-        runtime_root = os.getenv("POWER_TRADING_HOME")
-        if runtime_root:
-            return Path(runtime_root).resolve() / "config" / "common" / "kafka_config.yaml"
-        return cls._default_config_path
+    def _config_path(cls):
+        return cls.runtime_config_path("config", "common", "kafka_config.yaml")
 
     @classmethod
     def get_kafka(cls) -> dict[str, Any]:
-        loaded = cls.load_config_dict(cls._config_path())
-        kafka_config = loaded.get("kafka") if isinstance(loaded.get("kafka"), dict) else {}
-        if not kafka_config:
-            raise KeyError("Kafka config not configured")
-        return dict(kafka_config)
+        return cls.required_config_section(cls._config_path(), "kafka")
 
 
 __all__ = ["KafkaConfigLoader", "KafkaRuntimeSettings"]

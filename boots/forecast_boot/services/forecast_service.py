@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
 from functools import lru_cache
 
 from boots.forecast_boot.forecast_loader import ForecastAlgoConfigLoader
@@ -9,7 +8,7 @@ from boots.forecast_boot.services.messages import ForecastInMessages, ForecastOu
 from infrastructure.loaders.boots_loader import BootsConfigLoader
 from infrastructure.loaders.kafka_loader import KafkaConfigLoader, KafkaRuntimeSettings
 from infrastructure.loaders.topic_loader import TopicConfigLoader
-from infrastructure.kafka import Consumer, KafkaError, KafkaPublisher
+from infrastructure.kafka import KafkaBatchConsumer, KafkaPublisher
 from infrastructure.logging.logging import get_logger
 from infrastructure.schemas import PipelineStatusResponse
 from infrastructure.scheduler.timer import AsyncFixedRateScheduler
@@ -41,8 +40,12 @@ class ForecastService:
         self.forecast_topic_name = TopicConfigLoader.topic_name("forecast_boot", "execution_boot")
 
         self.publisher = KafkaPublisher(self.kafka_settings)
-        self.weather_consumer_group = self.kafka_settings.consumer_group("weather")
-        self.weather_consumer: Consumer | None = None
+        self.weather_consumer = KafkaBatchConsumer(
+            settings=self.kafka_settings,
+            topic_name=self.weather_topic_name,
+            group_suffix="weather",
+            poll_timeout_seconds=0.1,
+        )
         self.in_messages = ForecastInMessages()
         self.out_messages = ForecastOutMessages()
         self.algo = ForecastAlgo(
@@ -64,9 +67,7 @@ class ForecastService:
     def stop_pipeline(self) -> None:
         """Stop the scheduler and close the Kafka consumer."""
         self.update_scheduler.stop()
-        if self.weather_consumer is not None:
-            self.weather_consumer.close()
-            self.weather_consumer = None
+        self.weather_consumer.close()
 
     def get_pipeline_status(self) -> PipelineStatusResponse:
         """Return latest consumed weather payload and published forecast payload."""
@@ -89,43 +90,12 @@ class ForecastService:
         tear down the scheduler loop for subsequent cycles.
         """
 
-        consumer = self._get_or_create_weather_consumer()
         logger.info(
             "forecast_boot fixed-rate tick service=%s interval_seconds=%s",
             self.service_name,
             self.timer_interval_seconds,
         )
-        if consumer is None:
-            logger.info("Consumer is not available; skip current cycle")
-            return
-
-        polled_payloads: list[bytes] = []
-        while True:
-            message = consumer.poll(0.1)
-            if message is None:
-                break
-            if message.error():
-                if self._is_partition_eof(message.error()):
-                    break
-                if self._is_unknown_topic(message.error()):
-                    logger.info(
-                        "Kafka topic=%s is not available yet for service=%s; waiting for topic auto-creation",
-                        self.weather_topic_name,
-                        self.service_name,
-                    )
-                    break
-                logger.warning(
-                    "Kafka poll returned error service=%s topic=%s error=%s",
-                    self.service_name,
-                    self.weather_topic_name,
-                    message.error(),
-                )
-                break
-
-            payload = message.value()
-            if payload:
-                polled_payloads.append(payload)
-
+        polled_payloads = self.weather_consumer.drain_available()
         processed_messages = self._process_polled_batch(polled_payloads)
 
         if processed_messages:
@@ -166,47 +136,6 @@ class ForecastService:
             logger.info("forecast_boot published forecast event_id=%s", forecast_event.event_id)
             published += 1
         return published
-
-    def _get_or_create_weather_consumer(self) -> Consumer | None:
-        """Lazily create one Kafka consumer reused by the fixed-rate scheduler."""
-
-        if not self.kafka_settings.kafka_enabled:
-            logger.info("Kafka consumer disabled for service=%s", self.service_name)
-            return None
-
-        if Consumer is None:
-            logger.warning("confluent-kafka is not installed; consumer will not start")
-            return None
-
-        if self.weather_consumer is not None:
-            return self.weather_consumer
-
-        self.weather_consumer = Consumer(
-            {
-                "bootstrap.servers": self.kafka_settings.kafka_bootstrap_servers,
-                "group.id": self.weather_consumer_group,
-                "client.id": f"{self.kafka_settings.kafka_client_id}-{self.service_name}",
-                "auto.offset.reset": self.kafka_settings.kafka_auto_offset_reset,
-            }
-        )
-        self.weather_consumer.subscribe([self.weather_topic_name])
-        logger.info(
-            "forecast_boot AsyncIOScheduler fixed-rate consumer subscribed group=%s topic=%s interval_seconds=%s",
-            self.weather_consumer_group,
-            self.weather_topic_name,
-            self.timer_interval_seconds,
-        )
-        return self.weather_consumer
-
-    def _is_partition_eof(self, error: Any) -> bool:
-        """Return whether the Kafka error means the current partition is drained."""
-
-        return KafkaError is not None and error.code() == KafkaError._PARTITION_EOF
-
-    def _is_unknown_topic(self, error: Any) -> bool:
-        """Return whether the Kafka error means the topic does not exist yet."""
-
-        return KafkaError is not None and error.code() == KafkaError.UNKNOWN_TOPIC_OR_PART
 
 
 @lru_cache(maxsize=1)

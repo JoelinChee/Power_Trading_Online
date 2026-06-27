@@ -121,6 +121,10 @@
 |   `-- web/
 |       |-- start_web.sh
 |       `-- stop_web.sh
+|-- unit_test/
+|   |-- run_all_unit_tests.py
+|   |-- kafka/
+|   `-- system/
 |-- VERSION
 |-- .env.example
 `-- README.md
@@ -330,6 +334,14 @@ PYTHON_BIN=/path/to/python ./scripts/proto/compile_protos.sh
 
 首次安装入口。它会创建或复用 conda 环境，安装 `environment/requirements.txt`，安装 Kafka CLI 依赖，编译 proto，并预热本地 Kafka runtime。预热 Kafka 时设置了清理 trap，如果安装中途失败，会尽量停止临时启动的 Kafka，避免留下后台进程。
 
+安装脚本还会检查浏览器是否可用。它会先检测系统或 conda 环境中的常见浏览器命令，例如 `firefox`、`google-chrome`、`chromium`、`microsoft-edge`，以及 WSL/Windows 下的 `powershell.exe`、`cmd.exe`。如果都不存在，会通过 conda-forge 自动安装 Firefox：
+
+```bash
+conda install -n "$CONDA_ENV_NAME" -c conda-forge firefox -y
+```
+
+浏览器不是 Python pip 包，因此不会写入 `environment/requirements.txt`。Python requirements 只记录项目直接 import 的 Python 依赖；当前 Streamlit 前端直接使用 `pandas`，因此 `requirements.txt` 中包含 `pandas==2.3.3`。
+
 可通过环境变量调整 conda 环境名和 Python 版本：
 
 ```bash
@@ -341,6 +353,8 @@ CONDA_ENV_NAME=power_trading_online CONDA_PYTHON_VERSION=3.12 ./scripts/setup/in
 - `scripts/web/start_web.sh`
 
 启动 Streamlit 前端。默认使用 `/home/joelin/miniconda3/envs/test_RL/bin/python`，默认监听 `0.0.0.0:8088`，PID 写入 `generated/pids/web_frontend.pid`，日志写入 `generated/logs/web_frontend.log`。脚本会关闭 Streamlit 首次启动的交互式统计提示，并尝试自动打开浏览器。
+
+自动打开浏览器时，脚本会优先直接调用 `firefox`、`google-chrome`、`chrome`、`chromium`、`chromium-browser`、`microsoft-edge`、`brave-browser`。如果这些命令不可用，再回退到 `xdg-open`、`gio`、`powershell.exe`、`cmd.exe`。浏览器打开失败不会导致 web 服务启动失败，脚本会提示手动访问 `WEB_URL`。
 
 常用覆盖项：
 
@@ -520,6 +534,20 @@ scripts/kafka/kafka_play.sh \
 - 回放时会在 stderr 打印类似 `rosbag play` 的进度，例如 `12.3s / 61.1s (5/26, 19.2%)`。
 - 建议优先回灌到隔离 topic，再切换消费者验证链路。
 
+项目的系统测试默认使用 `generated/recordings/unittest_all_topics.bin` 作为录制/回放基准文件。这个文件由 Kafka 录制测试生成，包含 `power_trading.weather.events` 和 `power_trading.forecast.events` 两类消息。可用以下命令确认录制文件是否有效：
+
+```bash
+scripts/kafka/kafka_info.sh generated/recordings/unittest_all_topics.bin
+```
+
+只要 `Topics:` 下对应 topic 的计数大于 `0`，说明录制文件中包含该 topic 的消息，例如：
+
+```text
+Topics:
+	51  power_trading.forecast.events
+	51  power_trading.weather.events
+```
+
 本地启动后可执行动态联调：
 
 ```bash
@@ -530,11 +558,187 @@ python3 scripts/kafka/kafka_pipeline_smoke_test.py
 
 ---
 
-## 11. 版本管理与发布流程（二进制）
+## 11. Unit Test 测试脚本
+
+`unit_test/` 下维护了一组基于 Python 标准库 `unittest` 的系统级测试。这些测试不是纯函数级单测，而是面向本地运行脚本、Kafka 工具链、录制/回放文件和 boot 服务联动的动态验证。`unittest` 是 Python 标准库，不需要写入 `environment/requirements.txt`。
+
+### 11.1 总控脚本
+
+- `unit_test/run_all_unit_tests.py`
+
+总控入口会先做静态检查，确认所有测试脚本和必要清理脚本存在；然后执行启动前清理；最后串行运行所有测试并打印每个测试的 PASS/FAIL、耗时、输出和总体结果。
+
+运行方式：
+
+```bash
+python unit_test/run_all_unit_tests.py
+```
+
+运行一开始会先执行：
+
+```bash
+bash scripts/web/stop_web.sh
+bash scripts/runtime/stop_all.sh all
+```
+
+随后会用 `pgrep -f` + `kill -9` 强制清理可能残留的本地进程，包括：
+
+- `uvicorn boots.data_boot.main:app`
+- `uvicorn boots.forecast_boot.main:app`
+- `uvicorn boots.execution_boot.main:app`
+- `streamlit run web/app.py`
+- `scripts/kafka/kafka_record.py`
+- `scripts/kafka/kafka_play.py`
+- `scripts/kafka/kafka_topic_echo.py`
+- `kafka-server-start.sh`
+- `kafka.Kafka`
+
+总控脚本当前按以下顺序执行测试：
+
+1. `system_start_all_after_generated_delete`
+2. `system_stop_all_when_not_running`
+3. `kafka_record_all_topics`
+4. `kafka_play_echo_recording`
+5. `kafka_topic_list_and_info`
+6. `execution_boot_receives_replayed_forecasts`
+
+### 11.2 System 测试
+
+- `unit_test/system/test_start_all_after_generated_delete.py`
+
+该测试先停止所有服务，然后删除 `generated/`，再执行：
+
+```bash
+scripts/runtime/start_all.sh all
+```
+
+它验证 `start_all.sh` 能在运行产物目录缺失时重新创建必要目录、重新编译 proto、启动本地 Kafka，并启动三个 boot 服务。测试会断言输出包含：
+
+- `Started local Kafka with PID <数字>`
+- `Kafka is ready on 127.0.0.1:9092`
+- `Started data_boot on port 8001 with PID <数字>`
+- `Started forecast_boot on port 8002 with PID <数字>`
+- `Started execution_boot on port 8003 with PID <数字>`
+
+如果启动输出中出现 `error`，测试会失败。测试结束会执行 `stop_all.sh all` 清理进程。
+
+- `unit_test/system/test_stop_all_when_not_running.py`
+
+该测试先静默执行一次停止命令，确保服务已经停止；然后再次执行：
+
+```bash
+scripts/runtime/stop_all.sh all
+```
+
+它验证停止脚本在服务均未运行时仍保持幂等成功，并断言输出包含：
+
+```text
+execution_boot is not running
+forecast_boot is not running
+data_boot is not running
+Local Kafka is not running
+Requested shutdown complete
+```
+
+### 11.3 Kafka 测试
+
+- `unit_test/kafka/test_kafka_record_all_topics.py`
+
+该测试启动完整后端：
+
+```bash
+scripts/runtime/start_all.sh
+```
+
+然后启动 Streamlit web：
+
+```bash
+scripts/web/start_web.sh
+```
+
+web 页面会在初始化和每 10 秒自动触发一次 `data_boot`，从而推动 `data_boot -> forecast_boot -> execution_boot` 链路。测试等待 web 可访问、等待一次自动触发周期，并轮询 `forecast_boot` 的 pipeline status，确认 forecast 消息已经发布。之后执行 3 分钟全 topic 录制：
+
+```bash
+scripts/kafka/kafka_record.sh \
+	--all-topics \
+	--from-beginning \
+	--max-seconds 180 \
+	--output generated/recordings/unittest_all_topics.bin
+```
+
+录制完成后，测试会调用：
+
+```bash
+scripts/kafka/kafka_info.sh generated/recordings/unittest_all_topics.bin
+```
+
+并解析 `Topics:` 区域，要求 `power_trading.weather.events` 和 `power_trading.forecast.events` 的消息数都大于 `0`。
+
+- `unit_test/kafka/test_kafka_play_echo_recording.py`
+
+该测试只启动 local Kafka，不启动三个 boot 服务，也不执行 `start_all.sh`。它先启动：
+
+```bash
+scripts/kafka/start_local_kafka.sh
+```
+
+再用一个独立进程启动：
+
+```bash
+scripts/kafka/kafka_topic_echo.sh \
+	power_trading.weather.events \
+	power_trading.forecast.events \
+	--max-messages 1 \
+	--compact
+```
+
+随后使用录制文件回放一条消息：
+
+```bash
+scripts/kafka/kafka_play.sh \
+	-i generated/recordings/unittest_all_topics.bin \
+	--full-speed \
+	--limit 1
+```
+
+如果 echo 进程收到消息并打印包含 `power_trading.` 和 `payload` 的内容，则测试通过；如果回放报错、echo 没有输出或超时，测试失败。
+
+- `unit_test/kafka/test_kafka_topic_list_and_info.py`
+
+该测试验证两个 Kafka 工具脚本：
+
+```bash
+scripts/kafka/kafka_topic_list.sh
+scripts/kafka/kafka_info.sh generated/recordings/unittest_all_topics.bin
+```
+
+测试只启动 local Kafka，然后把 `unittest_all_topics.bin` 回放到原 topic，并额外回放几条到 `power_trading.unittest.replay.events`，确保 Kafka broker 上至少有 3 个非内部 topic。随后解析 `kafka_topic_list.sh` 的 `kcat -L` 输出，要求非 `__` 开头的 topic 数量不少于 `3`。最后验证 `kafka_info.sh` 能正常读取本地 bin 文件，输出 `Records:`、`Topics:`，且记录数大于 `0`。
+
+- `unit_test/kafka/test_execution_boot_receives_replayed_forecasts.py`
+
+该测试只通过 `start_all.sh` 启动 Kafka 和 `execution_boot`：
+
+```bash
+scripts/runtime/start_all.sh kafka execution
+```
+
+然后清空 `generated/logs/execution_boot.log`，使用录制文件全速回放：
+
+```bash
+scripts/kafka/kafka_play.sh \
+	-i generated/recordings/unittest_all_topics.bin \
+	--full-speed
+```
+
+测试会轮询 `execution_boot.log`，统计日志文本 `Kafka message received service=execution_boot` 出现次数。只要收到不少于 `5` 次 Kafka 消息，就认为 `execution_boot` 能正确消费回放的 forecast 数据；否则测试失败并打印 execution 日志尾部用于排查。
+
+---
+
+## 12. 版本管理与发布流程（二进制）
 
 > 目标：发布包顶层仅允许 `bin/`、`lib/`、`scripts/`、`config/`；禁止任何 `.py` 文件。
 
-### 11.1 版本号管理
+### 12.1 版本号管理
 
 ```bash
 ./scripts/release/release_version.sh --show
@@ -545,7 +749,7 @@ python3 scripts/kafka/kafka_pipeline_smoke_test.py
 
 版本号来自仓库根目录 `VERSION`。
 
-### 11.2 二进制打包
+### 12.2 二进制打包
 
 ```bash
 PYTHON_BIN=/home/joelin/miniconda3/envs/test_RL/bin/python ./scripts/release/package_release.sh
@@ -575,7 +779,7 @@ PYTHON_BIN=/home/joelin/miniconda3/envs/test_RL/bin/python ./scripts/release/pac
 - 解释器路径
 - 打包模式（binary-only）
 
-### 11.3 发布包验证
+### 12.3 发布包验证
 
 ```bash
 # 默认验证最新包
@@ -596,7 +800,7 @@ PYTHON_BIN=/home/joelin/miniconda3/envs/test_RL/bin/python ./scripts/release/pac
 
 ---
 
-## 12. /tmp 发布验证参考流程
+## 13. /tmp 发布验证参考流程
 
 如果你需要在隔离目录（如 `/tmp`）验证发布包：
 

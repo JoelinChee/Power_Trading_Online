@@ -39,8 +39,38 @@ fi
 
 PYTHON_BIN="$CONDA_ENV_DIR/bin/python"
 
+browser_available() {
+    local browser_commands=(
+        firefox
+        google-chrome
+        chrome
+        chromium
+        chromium-browser
+        microsoft-edge
+        brave-browser
+        powershell.exe
+        cmd.exe
+    )
+
+    for browser_command in "${browser_commands[@]}"; do
+        if command -v "$browser_command" >/dev/null 2>&1; then
+            return 0
+        fi
+    done
+
+    [[ -x "$CONDA_ENV_DIR/bin/firefox" || -x "$CONDA_ENV_DIR/bin/chromium" ]]
+}
+
 # Install Kafka CLI recorder dependency.
 conda install -n "$CONDA_ENV_NAME" -c conda-forge kafkacat -y
+
+# Install a browser only when neither the host nor the conda environment has one.
+if browser_available; then
+    echo "Browser is already available."
+else
+    echo "No browser found; installing Firefox into conda environment $CONDA_ENV_NAME."
+    conda install -n "$CONDA_ENV_NAME" -c conda-forge firefox -y
+fi
 
 # Install Python dependencies from the environment manifest using the selected interpreter.
 PYTHONPYCACHEPREFIX="$PTO_PYCACHE_DIR" "$PYTHON_BIN" -m pip install -r "$PTO_REPO_ROOT/environment/requirements.txt"
