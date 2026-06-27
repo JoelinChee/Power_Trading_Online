@@ -656,7 +656,7 @@ scripts/runtime/start_all.sh
 scripts/web/start_web.sh
 ```
 
-web 页面会在初始化和每 10 秒自动触发一次 `data_boot`，从而推动 `data_boot -> forecast_boot -> execution_boot` 链路。测试等待 web 可访问、等待一次自动触发周期，并轮询 `forecast_boot` 的 pipeline status，确认 forecast 消息已经发布。之后执行 3 分钟全 topic 录制：
+web 页面会在初始化和每 10 秒自动触发一次 `data_boot`，从而推动 `data_boot -> forecast_boot -> execution_boot` 链路。测试等待 web 可访问、等待一次自动触发周期；同时为了兼容 GitHub Actions 这类没有真实浏览器会话的 headless 环境，测试会显式访问 `data_boot` 根路径触发样本数据发布。随后它会轮询 `forecast_boot` 的 pipeline status，确认 forecast 消息已经发布。之后执行 3 分钟全 topic 录制：
 
 ```bash
 scripts/kafka/kafka_record.sh \
@@ -883,8 +883,8 @@ bash scripts/stop_all.sh
 
 触发条件：
 
-- 所有 `pull_request` 都会执行。
-- 所有 `push` 都会执行。
+- 所有 `pull_request` 都会执行，用于 PR 合并门禁。
+- 只有推送到 `main` 或 `master` 时才会执行 `push`，避免 PR 分支每次 push 同时触发 `push` 和 `pull_request` 两套重复检查。
 - 测试脚本返回非 `0` 退出码时，CI 标红失败。
 - 只有 CI 全绿，才满足分支保护的合并门禁条件。
 
@@ -896,6 +896,9 @@ name: Unit Test
 on:
   pull_request:
   push:
+		branches:
+			- main
+			- master
 
 jobs:
   test:
