@@ -65,6 +65,7 @@ class KafkaRecordAllTopicsTest(unittest.TestCase):
 
         self._wait_for_web_frontend()
         time.sleep(12)
+        self._trigger_data_boot_updates(count=3)
         self._wait_for_forecast_publication()
 
         record_result = subprocess.run(
@@ -138,6 +139,23 @@ class KafkaRecordAllTopicsTest(unittest.TestCase):
                 time.sleep(1)
 
         self.fail(f"web frontend did not become reachable before timeout: {last_error}")
+
+    def _trigger_data_boot_updates(self, count):
+        last_error = None
+        success_count = 0
+        for _ in range(count):
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:8001/", timeout=10) as response:
+                    self.assertEqual(response.status, 200)
+                    success_count += 1
+            except OSError as exc:
+                last_error = exc
+                time.sleep(1)
+                continue
+            time.sleep(1)
+
+        if success_count == 0:
+            self.fail(f"data_boot trigger failed before recording started: {last_error}")
 
     def _wait_for_forecast_publication(self):
         deadline = time.monotonic() + 60
