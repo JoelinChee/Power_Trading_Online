@@ -168,3 +168,4 @@ class DataAlgo:
 
         labels = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
         return labels[int((direction_degrees + 22.5) % 360 // 45)]
+
