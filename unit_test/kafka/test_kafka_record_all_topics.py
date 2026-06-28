@@ -16,8 +16,10 @@ class KafkaRecordAllTopicsTest(unittest.TestCase):
     start_web_script = repo_root / "scripts" / "web" / "start_web.sh"
     stop_web_script = repo_root / "scripts" / "web" / "stop_web.sh"
     record_script = repo_root / "scripts" / "kafka" / "kafka_record.sh"
+    echo_script = repo_root / "scripts" / "kafka" / "kafka_topic_echo.sh"
     info_script = repo_root / "scripts" / "kafka" / "kafka_info.sh"
     recording_path = repo_root / "generated" / "recordings" / "unittest_all_topics.bin"
+    forecast_topic = "power_trading.forecast.events"
 
     def setUp(self):
         self.env = os.environ.copy()
@@ -67,6 +69,7 @@ class KafkaRecordAllTopicsTest(unittest.TestCase):
         time.sleep(12)
         self._trigger_data_boot_updates(count=3)
         self._wait_for_forecast_publication()
+        self._wait_for_forecast_kafka_message()
 
         record_result = subprocess.run(
             [
@@ -114,7 +117,7 @@ class KafkaRecordAllTopicsTest(unittest.TestCase):
             f"kafka_info.sh exited with status {info_result.returncode}\n{info_result.stdout}",
         )
         topic_counts = self._parse_topic_counts(info_result.stdout)
-        self.assertGreater(topic_counts.get("power_trading.forecast.events", 0), 0, info_result.stdout)
+        self.assertGreater(topic_counts.get(self.forecast_topic, 0), 0, info_result.stdout)
         self.assertGreater(topic_counts.get("power_trading.weather.events", 0), 0, info_result.stdout)
 
     @staticmethod
@@ -175,6 +178,55 @@ class KafkaRecordAllTopicsTest(unittest.TestCase):
         self.fail(
             "forecast_boot did not publish forecast events before recording started; "
             f"last_payload={last_payload!r} last_error={last_error!r}"
+        )
+
+    def _wait_for_forecast_kafka_message(self):
+        deadline = time.monotonic() + 90
+        last_echo_output = ""
+        last_echo_error = None
+        last_status_payload = None
+        while time.monotonic() < deadline:
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:8002/api/v1/forecast/pipeline-status", timeout=3) as response:
+                    last_status_payload = json.loads(response.read().decode("utf-8"))
+            except (OSError, json.JSONDecodeError):
+                last_status_payload = None
+
+            if last_status_payload and last_status_payload.get("last_published_event_id"):
+                try:
+                    echo_result = subprocess.run(
+                        [
+                            "bash",
+                            str(self.echo_script),
+                            self.forecast_topic,
+                            "--from-beginning",
+                            "--max-messages",
+                            "1",
+                            "--compact",
+                            "--no-separator",
+                        ],
+                        cwd=self.repo_root,
+                        env=self.env,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        timeout=10,
+                        check=False,
+                    )
+                    last_echo_output = echo_result.stdout
+                    if echo_result.returncode == 0 and self.forecast_topic in echo_result.stdout:
+                        return
+                except subprocess.TimeoutExpired as exc:
+                    last_echo_error = exc
+                    last_echo_output = exc.stdout or ""
+
+            self._trigger_data_boot_updates(count=1)
+            time.sleep(2)
+
+        self.fail(
+            "forecast topic did not contain a Kafka message before recording started; "
+            f"last_status_payload={last_status_payload!r} "
+            f"last_echo_error={last_echo_error!r} last_echo_output={last_echo_output!r}"
         )
 
     def _stop_all(self):
