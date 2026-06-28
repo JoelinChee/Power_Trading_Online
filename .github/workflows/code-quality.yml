@@ -1,0 +1,67 @@
+name: Code Quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  incremental-python-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Detect changed Python files
+        id: changed-python-files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git fetch --no-tags --prune --depth=1 origin "${{ github.base_ref }}"
+            base_ref="$(git merge-base HEAD "origin/${{ github.base_ref }}")"
+          elif [[ -n "${{ github.event.before }}" && "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]]; then
+            base_ref="${{ github.event.before }}"
+          else
+            base_ref="$(git hash-object -t tree /dev/null)"
+          fi
+
+          mapfile -t changed_files < <(
+            git diff --name-only --diff-filter=ACMRT "${base_ref}" HEAD -- '*.py' \
+              ':!generated/**' \
+              ':!**/__pycache__/**'
+          )
+
+          if (( ${#changed_files[@]} == 0 )); then
+            echo "has_changed_python=false" >> "$GITHUB_OUTPUT"
+            echo "No changed Python files to scan."
+            exit 0
+          fi
+
+          printf '%s\0' "${changed_files[@]}" > changed-python-files.txt
+          echo "has_changed_python=true" >> "$GITHUB_OUTPUT"
+          echo "Changed Python files:"
+          tr '\0' '\n' < changed-python-files.txt
+
+      - name: Install Ruff
+        if: steps.changed-python-files.outputs.has_changed_python == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ruff==0.8.6
+
+      - name: Run incremental Ruff scan
+        if: steps.changed-python-files.outputs.has_changed_python == 'true'
+        run: |
+          xargs -0 -a changed-python-files.txt ruff check
