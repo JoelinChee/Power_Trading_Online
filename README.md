@@ -656,7 +656,7 @@ scripts/runtime/start_all.sh
 scripts/web/start_web.sh
 ```
 
-web 页面会在初始化和每 10 秒自动触发一次 `data_boot`，从而推动 `data_boot -> forecast_boot -> execution_boot` 链路。测试等待 web 可访问、等待一次自动触发周期，并轮询 `forecast_boot` 的 pipeline status，确认 forecast 消息已经发布。之后执行 3 分钟全 topic 录制：
+web 页面会在初始化和每 10 秒自动触发一次 `data_boot`，从而推动 `data_boot -> forecast_boot -> execution_boot` 链路。测试等待 web 可访问、等待一次自动触发周期；同时为了兼容 GitHub Actions 这类没有真实浏览器会话的 headless 环境，测试会显式访问 `data_boot` 根路径触发样本数据发布。随后它会轮询 `forecast_boot` 的 pipeline status，确认 forecast 消息已经发布。之后执行 3 分钟全 topic 录制：
 
 ```bash
 scripts/kafka/kafka_record.sh \
@@ -869,7 +869,123 @@ bash scripts/stop_all.sh
 
 ---
 
-## 14. 后续建议
+## 14. GitHub 配置 Unit Test CI：测试全部通过才允许 PR 合并
+
+完整流程分三步：1. 编写 GitHub Actions 测试流水线，自动跑单元测试；2. 配置分支保护，强制校验测试结果；3. 提交 PR 验证效果。测试失败时，GitHub 的合并按钮会被置灰，不能合入受保护分支。
+
+### 14.1 创建 GitHub Actions 单元测试脚本
+
+本仓库已新增 CI 文件：
+
+```text
+.github/workflows/unit-test.yml
+```
+
+触发条件：
+
+- 所有 `pull_request` 都会执行，用于 PR 合并门禁。
+- 只有推送到 `main` 或 `master` 时才会执行 `push`，避免 PR 分支每次 push 同时触发 `push` 和 `pull_request` 两套重复检查。
+- 测试脚本返回非 `0` 退出码时，CI 标红失败。
+- 只有 CI 全绿，才满足分支保护的合并门禁条件。
+
+当前 workflow 内容按本项目实际运行方式配置：
+
+```yaml
+name: Unit Test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java for local Kafka
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: "3.12"
+          activate-environment: power_trading_online
+
+      - name: Install project environment
+        shell: bash -el {0}
+        run: |
+          ./scripts/setup/install_environment.sh
+
+      - name: Run unit test suite
+        shell: bash -el {0}
+        run: |
+          conda activate power_trading_online
+          python unit_test/run_all_unit_tests.py
+```
+
+说明：
+
+- 本项目不是用 `pytest`，而是使用 Python 标准库 `unittest`，入口是 `unit_test/run_all_unit_tests.py`。
+- CI 先安装 Java，因为本地 Kafka 运行时需要 JVM。
+- CI 使用 conda 创建 `power_trading_online` 环境。
+- `scripts/setup/install_environment.sh` 会安装 Python requirements、`kafkacat`、必要浏览器、编译 proto，并预热 Kafka runtime。
+- `unit_test/run_all_unit_tests.py` 会依次执行 system 和 Kafka 相关测试；任意测试失败都会让 workflow 失败。
+
+### 14.2 配置分支保护强制校验测试结果
+
+GitHub Actions 文件只能定义 CI，真正“测试不通过禁止合并”需要在 GitHub 仓库页面配置分支保护。
+
+配置路径：
+
+```text
+Repository -> Settings -> Branches -> Branch protection rules -> Add rule
+```
+
+推荐配置：
+
+1. Branch name pattern 填写主分支，例如 `main` 或 `master`。
+2. 勾选 `Require a pull request before merging`。
+3. 勾选 `Require status checks to pass before merging`。
+4. 在 required checks 中选择本 workflow 的检查项，通常显示为 `test` 或 `Unit Test / test`。
+5. 建议勾选 `Require branches to be up to date before merging`，避免旧代码绕过最新测试。
+6. 保存规则。
+
+配置完成后，PR 合并前必须满足：
+
+- GitHub Actions 的 `Unit Test` workflow 运行成功。
+- `unit_test/run_all_unit_tests.py` 中所有测试通过。
+- 如果任意测试失败，PR 页面会显示红色检查项，合并按钮不可用。
+
+### 14.3 验证效果
+
+验证方式：
+
+1. 提交一笔正常代码，推送分支并创建 PR。
+2. 在 PR 页面查看 `Checks`，确认 `Unit Test / test` 自动运行。
+3. 测试通过时，检查项显示绿色，PR 可以合并。
+4. 临时制造一个测试失败，例如让某个 unittest 断言失败，再推送到测试分支。
+5. 确认 `Unit Test / test` 变红，并且合并按钮被置灰。
+
+本地可以先运行同一套测试，提前发现 CI 问题：
+
+```bash
+python unit_test/run_all_unit_tests.py
+```
+
+---
+
+## 15. 后续建议
 
 1. 增加 CI 发布校验（强制 no-`.py` + 可启动 + 可关闭）。
 2. 为二进制包补充校验和（SHA256）与签名。
